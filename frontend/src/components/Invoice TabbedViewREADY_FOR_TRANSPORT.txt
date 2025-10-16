@@ -1,0 +1,104 @@
+I'll add this implementation right after the QC Inspection Card (after line 368, before the Activity Log Section at line 371):
+
+STATE VARIABLES (add after line 123):
+```javascript
+  // Ready for Transport state
+  const [readyForTransport, setReadyForTransport] = useState(false);
+  const [transportNotes, setTransportNotes] = useState('');
+  const [updatingTransport, setUpdatingTransport] = useState(false);
+```
+
+HANDLER FUNCTION (add after handleUpdateBV function, around line 214):
+```javascript
+  const handleMarkReadyForTransport = async () => {
+    if (!readyForTransport) {
+      alert('Please confirm the invoice is ready for transport by checking the box');
+      return;
+    }
+
+    setUpdatingTransport(true);
+    try {
+      const response = await axios.post(`http://localhost:8000/api/invoices/${invoice.id}/mark-ready-for-transport`, {
+        confirmed: readyForTransport,
+        notes: transportNotes
+      });
+
+      // Update local state
+      invoice.ready_dispatch_at = response.data.invoice.ready_dispatch_at;
+      invoice.current_stage = 'ready_dispatch';
+
+      alert('Invoice marked as ready for transport successfully!');
+      setTransportNotes('');
+      setReadyForTransport(false);
+      // Refresh activities after update
+      fetchActivities();
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Failed to mark ready for transport: ' + (error.response?.data?.error || error.message));
+    } finally {
+      setUpdatingTransport(false);
+    }
+  };
+```
+
+READY FOR TRANSPORT CARD (add after line 368, before the Activity Log Section):
+```javascript
+        {/* Ready for Transport Card - Show when QC/BV passed and not yet marked ready */}
+        {!invoice.ready_dispatch_at &&
+         (!invoice.requires_qc || invoice.qc_status === 'passed') &&
+         (!invoice.requires_bv || invoice.bv_status === 'passed') && (
+          <Paper elevation={2} sx={{ p: 3, mb: 2, borderLeft: '4px solid #14B8A6' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <TruckIcon sx={{ color: '#14B8A6' }} />
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>Ready for Transport</Typography>
+            </Box>
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
+              All inspection requirements have been completed. Mark this invoice as ready for transport to queue it for Load Confirmation and Manifest creation.
+            </Typography>
+
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={readyForTransport}
+                  onChange={(e) => setReadyForTransport(e.target.checked)}
+                  sx={{
+                    color: '#14B8A6',
+                    '&.Mui-checked': {
+                      color: '#14B8A6',
+                    },
+                  }}
+                />
+              }
+              label="I confirm this invoice is ready for transport"
+              sx={{ mb: 2 }}
+            />
+
+            <TextField
+              label="Notes (Optional)"
+              multiline
+              rows={3}
+              value={transportNotes}
+              onChange={(e) => setTransportNotes(e.target.value)}
+              fullWidth
+              sx={{ mb: 2 }}
+              placeholder="Add any notes about transport readiness..."
+            />
+
+            <Button
+              variant="contained"
+              startIcon={<TruckIcon />}
+              onClick={handleMarkReadyForTransport}
+              disabled={!readyForTransport || updatingTransport}
+              sx={{
+                bgcolor: '#14B8A6',
+                color: 'white',
+                fontWeight: 600,
+                '&:hover': { bgcolor: '#0F9687' },
+                '&:disabled': { bgcolor: '#cccccc' }
+              }}
+            >
+              {updatingTransport ? 'Processing...' : 'Mark Ready for Transport'}
+            </Button>
+          </Paper>
+        )}
+```

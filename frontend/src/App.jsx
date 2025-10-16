@@ -1,35 +1,44 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import Dashboard from './pages/Dashboard';
+import TransportRequestList from './pages/TransportRequestList';
+import TransportPlannerDashboard from './pages/TransportPlannerDashboard';
+import ProfileSwitcher from './components/ProfileSwitcher';
+
+// Create Material-UI theme
+const theme = createTheme({
+  palette: {
+    primary: {
+      main: '#38b2ac',
+      light: '#73e9c7',
+      dark: '#2c7a7b',
+    },
+    secondary: {
+      main: '#73e9c7',
+    },
+  },
+  typography: {
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  },
+});
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Router>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/transport-requests" element={<TransportRequestList />} />
+          <Route path="/transport-planner" element={<TransportPlannerDashboard />} />
+          {/* Add more routes as we build them */}
+        </Routes>
+        {/* Profile Switcher for testing - bottom right floating button */}
+        <ProfileSwitcher />
+      </Router>
+    </ThemeProvider>
+  );
 }
 
-export default App
+export default App;

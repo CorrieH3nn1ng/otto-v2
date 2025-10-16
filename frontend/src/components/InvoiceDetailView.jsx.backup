@@ -1,0 +1,803 @@
+import React, { useState } from 'react';
+import {
+  Box,
+  Paper,
+  Grid,
+  Typography,
+  Tabs,
+  Tab,
+  Button,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  IconButton,
+  TextField,
+} from '@mui/material';
+import {
+  ExpandMore as ExpandMoreIcon,
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  Save as SaveIcon,
+  Cancel as CancelIcon,
+} from '@mui/icons-material';
+
+const InvoiceDetailView = ({ invoice, mode = 'readonly', onSave }) => {
+  const [currentTab, setCurrentTab] = useState(0);
+  const [showRaw, setShowRaw] = useState(false);
+  const [isEditing, setIsEditing] = useState(mode === 'editable');
+  const [editedInvoice, setEditedInvoice] = useState(invoice);
+
+  const handleTabChange = (event, newValue) => {
+    setCurrentTab(newValue);
+  };
+
+  const handleSave = () => {
+    if (onSave) {
+      onSave(editedInvoice);
+    }
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditedInvoice(invoice);
+    setIsEditing(false);
+  };
+
+  const isEditable = mode === 'editable' && isEditing;
+
+  // Header field component with enhanced styling
+  const HeaderField = ({ label, value, field, multiline = false }) => {
+    if (isEditable) {
+      return (
+        <Grid item xs={12} sm={6} md={4}>
+          <TextField
+            label={label}
+            value={editedInvoice[field] || ''}
+            onChange={(e) => setEditedInvoice({ ...editedInvoice, [field]: e.target.value })}
+            fullWidth
+            size="small"
+            multiline={multiline}
+            rows={multiline ? 2 : 1}
+          />
+        </Grid>
+      );
+    }
+    return (
+      <Grid item xs={12} sm={6} md={4}>
+        <Typography variant="caption" sx={{ color: '#666', fontWeight: 500, textTransform: 'uppercase', fontSize: '0.7rem' }}>
+          {label}
+        </Typography>
+        <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 500, color: '#333' }}>
+          {value || '-'}
+        </Typography>
+      </Grid>
+    );
+  };
+
+  return (
+    <Box sx={{ width: '100%' }}>
+      {/* Invoice Header Panel */}
+      <Paper
+        elevation={3}
+        sx={{
+          p: 3,
+          mb: 3,
+          background: 'linear-gradient(to bottom, #ffffff 0%, #f5f5f5 100%)',
+          borderRadius: 2,
+          border: '1px solid #d0d0d0'
+        }}
+      >
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          mb: 3,
+          pb: 2,
+          borderBottom: '2px solid #001f3f'
+        }}>
+          <Typography variant="h5" sx={{ fontWeight: 600, color: '#001f3f' }}>
+            Invoice Details
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            {mode === 'editable' && !isEditing && (
+              <Button
+                startIcon={<EditIcon />}
+                onClick={() => setIsEditing(true)}
+                variant="contained"
+                size="small"
+                sx={{ bgcolor: '#73e9c7', color: '#001f3f', '&:hover': { bgcolor: '#5fd4b3' } }}
+              >
+                Edit
+              </Button>
+            )}
+            {isEditing && (
+              <>
+                <Button
+                  startIcon={<SaveIcon />}
+                  onClick={handleSave}
+                  variant="contained"
+                  size="small"
+                  sx={{ bgcolor: '#73e9c7', color: '#001f3f', '&:hover': { bgcolor: '#5fd4b3' } }}
+                >
+                  Save
+                </Button>
+                <Button
+                  startIcon={<CancelIcon />}
+                  onClick={handleCancel}
+                  variant="outlined"
+                  size="small"
+                  sx={{ borderColor: '#001f3f', color: '#001f3f' }}
+                >
+                  Cancel
+                </Button>
+              </>
+            )}
+            <Button
+              variant="outlined"
+              onClick={() => setShowRaw(!showRaw)}
+              size="small"
+              sx={{ borderColor: '#999', color: '#666' }}
+            >
+              RAW
+            </Button>
+          </Box>
+        </Box>
+
+        {/* Two columns: Primary Information and Shipping & Terms */}
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid item xs={12} md={6}>
+            <Box sx={{ p: 2, bgcolor: '#e6f9f5', borderRadius: 1, border: '1px solid #73e9c7', height: '100%' }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#001f3f', mb: 2 }}>
+                Primary Information
+              </Typography>
+              <Grid container spacing={2}>
+                <HeaderField label="Invoice Number" value={invoice.invoice_number} field="invoice_number" />
+                <HeaderField label="Invoice Date" value={invoice.invoice_date} field="invoice_date" />
+                <HeaderField label="Supplier" value={invoice.supplier_id} field="supplier_id" />
+                <HeaderField label="Customer" value={invoice.customer_id} field="customer_id" />
+                <HeaderField label="Total Amount" value={invoice.total_amount} field="total_amount" />
+                <HeaderField label="Currency" value={invoice.currency} field="currency" />
+              </Grid>
+            </Box>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Box sx={{ p: 2, bgcolor: '#f5f5f5', borderRadius: 1, border: '1px solid #d0d0d0', height: '100%' }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#001f3f', mb: 2 }}>
+                Shipping & Terms
+              </Typography>
+              <Grid container spacing={2}>
+                <HeaderField label="Incoterms" value={invoice.incoterms} field="incoterms" />
+                <HeaderField label="PO Number" value={invoice.po_number} field="po_number" />
+                <HeaderField label="Payment Terms" value={invoice.payment_terms} field="payment_terms" />
+                <HeaderField label="Delivery Method" value={invoice.delivery_method} field="delivery_method" />
+                <HeaderField label="HS Code" value={invoice.hs_code} field="hs_code" />
+                <HeaderField label="Country of Origin" value={invoice.country_of_origin} field="country_of_origin" />
+              </Grid>
+            </Box>
+          </Grid>
+        </Grid>
+
+        {/* Addresses & Contact Details - Main Panel */}
+        <Box sx={{ p: 2, bgcolor: '#e6f9f5', borderRadius: 1, border: '1px solid #73e9c7' }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#001f3f', mb: 2 }}>
+            Addresses & Contact Details
+          </Typography>
+
+          {/* Three sub-panels - each 33.33% width */}
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
+            {/* Supplier/Collection Address */}
+            <Box sx={{ flex: 1, p: 2, bgcolor: '#ffffff', borderRadius: 1, border: '1px solid #d0d0d0' }}>
+              <Typography variant="caption" sx={{ fontWeight: 600, color: '#001f3f', mb: 1, display: 'block' }}>
+                Supplier/Collection Address
+              </Typography>
+              <Typography
+                variant="body2"
+                sx={{
+                  fontSize: '0.85rem',
+                  color: '#001f3f',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'break-word',
+                  whiteSpace: 'normal',
+                  lineHeight: 1.6
+                }}
+              >
+                {invoice.supplier_address || '-'}
+              </Typography>
+            </Box>
+
+            {/* Delivery Address */}
+            <Box sx={{ flex: 1, p: 2, bgcolor: '#ffffff', borderRadius: 1, border: '1px solid #d0d0d0' }}>
+              <Typography variant="caption" sx={{ fontWeight: 600, color: '#001f3f', mb: 1, display: 'block' }}>
+                Delivery Address
+              </Typography>
+              <Typography
+                variant="body2"
+                sx={{
+                  fontSize: '0.85rem',
+                  color: '#001f3f',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'break-word',
+                  whiteSpace: 'normal',
+                  lineHeight: 1.6
+                }}
+              >
+                {invoice.delivery_address || '-'}
+              </Typography>
+            </Box>
+
+            {/* Contact Details */}
+            <Box sx={{ flex: 1, p: 2, bgcolor: '#ffffff', borderRadius: 1, border: '1px solid #d0d0d0' }}>
+              <Typography variant="caption" sx={{ fontWeight: 600, color: '#001f3f', mb: 1, display: 'block' }}>
+                Contact Details
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#666', fontWeight: 500, textTransform: 'uppercase', fontSize: '0.65rem' }}>
+                    Contact
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500, color: '#333', wordWrap: 'break-word' }}>
+                    {invoice.supplier_contact || '-'}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#666', fontWeight: 500, textTransform: 'uppercase', fontSize: '0.65rem' }}>
+                    Email
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500, color: '#333', wordWrap: 'break-word' }}>
+                    {invoice.supplier_email || '-'}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#666', fontWeight: 500, textTransform: 'uppercase', fontSize: '0.65rem' }}>
+                    Exporter Code
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500, color: '#333', wordWrap: 'break-word' }}>
+                    {invoice.exporter_code || '-'}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+          </Box>
+        </Box>
+      </Paper>
+
+      {/* RAW JSON Accordion */}
+      {showRaw && (
+        <Accordion sx={{ mb: 2, border: '1px solid #e0e0e0' }} elevation={2}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: '#f5f5f5' }}>
+            <Typography sx={{ fontWeight: 600 }}>Raw JSON Data</Typography>
+          </AccordionSummary>
+          <AccordionDetails sx={{ bgcolor: '#fafafa' }}>
+            <pre style={{ overflow: 'auto', maxHeight: '400px', fontSize: '0.85rem' }}>
+              {JSON.stringify(invoice, null, 2)}
+            </pre>
+          </AccordionDetails>
+        </Accordion>
+      )}
+
+      {/* Tabs Section */}
+      <Paper elevation={3} sx={{ borderRadius: 2, overflow: 'hidden' }}>
+        <Tabs
+          value={currentTab}
+          onChange={handleTabChange}
+          sx={{
+            bgcolor: '#f5f5f5',
+            borderBottom: '2px solid #001f3f',
+            '& .MuiTab-root': {
+              fontWeight: 600,
+              fontSize: '0.95rem',
+              color: '#001f3f'
+            },
+            '& .Mui-selected': {
+              color: '#001f3f'
+            },
+            '& .MuiTabs-indicator': {
+              backgroundColor: '#73e9c7',
+              height: 3
+            }
+          }}
+        >
+          <Tab label="Line Items" />
+          <Tab label="Packing Details" />
+          <Tab label="Delivery Note" />
+        </Tabs>
+
+        {/* Tab Panels */}
+        <Box sx={{ p: 3 }}>
+          {currentTab === 0 && (
+            <LineItemsTab
+              items={editedInvoice.line_items || []}
+              isEditable={isEditable}
+              onChange={(items) => setEditedInvoice({ ...editedInvoice, line_items: items })}
+            />
+          )}
+          {currentTab === 1 && (
+            <PackingDetailsTab
+              details={editedInvoice.packing_details || []}
+              isEditable={isEditable}
+              onChange={(details) => setEditedInvoice({ ...editedInvoice, packing_details: details })}
+            />
+          )}
+          {currentTab === 2 && (
+            <DeliveryNoteTab items={invoice.delivery_note_items || []} />
+          )}
+        </Box>
+      </Paper>
+    </Box>
+  );
+};
+
+// Line Items Tab Component
+const LineItemsTab = ({ items, isEditable, onChange }) => {
+  const handleAddItem = () => {
+    const newItem = {
+      line_number: items.length + 1,
+      item_code: '',
+      description: '',
+      quantity: 0,
+      unit_of_measure: '',
+      unit_price: 0,
+      line_total: 0,
+      hs_code: '',
+      country_of_origin: '',
+      is_kit_item: false,
+    };
+    onChange([...items, newItem]);
+  };
+
+  const handleDeleteItem = (index) => {
+    const newItems = items.filter((_, i) => i !== index);
+    onChange(newItems);
+  };
+
+  const handleUpdateItem = (index, field, value) => {
+    const newItems = [...items];
+    newItems[index] = { ...newItems[index], [field]: value };
+
+    // Auto-calculate line total
+    if (field === 'quantity' || field === 'unit_price') {
+      const qty = field === 'quantity' ? parseFloat(value) : parseFloat(newItems[index].quantity);
+      const price = field === 'unit_price' ? parseFloat(value) : parseFloat(newItems[index].unit_price);
+      newItems[index].line_total = (qty * price).toFixed(2);
+    }
+
+    onChange(newItems);
+  };
+
+  if (!items || items.length === 0) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 6, bgcolor: '#fafafa', borderRadius: 1 }}>
+        <Typography variant="h6" color="textSecondary" gutterBottom>
+          No line items
+        </Typography>
+        {isEditable && (
+          <Button
+            startIcon={<AddIcon />}
+            onClick={handleAddItem}
+            variant="contained"
+            color="primary"
+            sx={{ mt: 2 }}
+          >
+            Add Line Item
+          </Button>
+        )}
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      {isEditable && (
+        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button
+            startIcon={<AddIcon />}
+            onClick={handleAddItem}
+            variant="contained"
+            color="primary"
+          >
+            Add Line Item
+          </Button>
+        </Box>
+      )}
+      <TableContainer sx={{ border: '1px solid #e0e0e0', borderRadius: 1 }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow sx={{ bgcolor: '#1976d2' }}>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Line #</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Item Code</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Description</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Quantity</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>UOM</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Unit Price</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Line Total</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>HS Code</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Country</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Is Kit</TableCell>
+              {isEditable && <TableCell sx={{ color: 'white', fontWeight: 600 }}>Actions</TableCell>}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {items.map((item, index) => (
+              <TableRow
+                key={index}
+                sx={{
+                  '&:nth-of-type(odd)': { bgcolor: '#f9f9f9' },
+                  '&:hover': { bgcolor: '#f0f0f0' }
+                }}
+              >
+                <TableCell sx={{ fontWeight: 500 }}>{item.line_number}</TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      value={item.item_code || ''}
+                      onChange={(e) => handleUpdateItem(index, 'item_code', e.target.value)}
+                      size="small"
+                      fullWidth
+                    />
+                  ) : (
+                    item.item_code || '-'
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      value={item.description || ''}
+                      onChange={(e) => handleUpdateItem(index, 'description', e.target.value)}
+                      size="small"
+                      fullWidth
+                      multiline
+                    />
+                  ) : (
+                    item.description || '-'
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      type="number"
+                      value={item.quantity || 0}
+                      onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value)}
+                      size="small"
+                      sx={{ width: 100 }}
+                    />
+                  ) : (
+                    item.quantity
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      value={item.unit_of_measure || ''}
+                      onChange={(e) => handleUpdateItem(index, 'unit_of_measure', e.target.value)}
+                      size="small"
+                      sx={{ width: 80 }}
+                    />
+                  ) : (
+                    item.unit_of_measure || '-'
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      type="number"
+                      value={item.unit_price || 0}
+                      onChange={(e) => handleUpdateItem(index, 'unit_price', e.target.value)}
+                      size="small"
+                      sx={{ width: 100 }}
+                    />
+                  ) : (
+                    item.unit_price
+                  )}
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>{item.line_total}</TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      value={item.hs_code || ''}
+                      onChange={(e) => handleUpdateItem(index, 'hs_code', e.target.value)}
+                      size="small"
+                      sx={{ width: 120 }}
+                    />
+                  ) : (
+                    item.hs_code || '-'
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      value={item.country_of_origin || ''}
+                      onChange={(e) => handleUpdateItem(index, 'country_of_origin', e.target.value)}
+                      size="small"
+                      sx={{ width: 120 }}
+                    />
+                  ) : (
+                    item.country_of_origin || '-'
+                  )}
+                </TableCell>
+                <TableCell>{item.is_kit_item ? 'Yes' : 'No'}</TableCell>
+                {isEditable && (
+                  <TableCell>
+                    <IconButton size="small" onClick={() => handleDeleteItem(index)} color="error">
+                      <DeleteIcon />
+                    </IconButton>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Box>
+  );
+};
+
+// Packing Details Tab Component
+const PackingDetailsTab = ({ details, isEditable, onChange }) => {
+  const handleAddDetail = () => {
+    const newDetail = {
+      package_number: details.length + 1,
+      package_type: '',
+      length_cm: 0,
+      width_cm: 0,
+      height_cm: 0,
+      cbm: 0,
+      gross_weight_kg: 0,
+      net_weight_kg: 0,
+      volumetric_weight_kg: 0,
+      contents_description: '',
+    };
+    onChange([...details, newDetail]);
+  };
+
+  const handleDeleteDetail = (index) => {
+    const newDetails = details.filter((_, i) => i !== index);
+    onChange(newDetails);
+  };
+
+  const handleUpdateDetail = (index, field, value) => {
+    const newDetails = [...details];
+    newDetails[index] = { ...newDetails[index], [field]: value };
+
+    // Auto-calculate CBM if dimensions change
+    if (field === 'length_cm' || field === 'width_cm' || field === 'height_cm') {
+      const l = field === 'length_cm' ? parseFloat(value) : parseFloat(newDetails[index].length_cm);
+      const w = field === 'width_cm' ? parseFloat(value) : parseFloat(newDetails[index].width_cm);
+      const h = field === 'height_cm' ? parseFloat(value) : parseFloat(newDetails[index].height_cm);
+      newDetails[index].cbm = ((l * w * h) / 1000000).toFixed(6);
+
+      // Calculate volumetric weight (CBM * 167 for air freight)
+      newDetails[index].volumetric_weight_kg = (parseFloat(newDetails[index].cbm) * 167).toFixed(3);
+    }
+
+    onChange(newDetails);
+  };
+
+  if (!details || details.length === 0) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 6, bgcolor: '#fafafa', borderRadius: 1 }}>
+        <Typography variant="h6" color="textSecondary" gutterBottom>
+          No packing details
+        </Typography>
+        {isEditable && (
+          <Button
+            startIcon={<AddIcon />}
+            onClick={handleAddDetail}
+            variant="contained"
+            color="primary"
+            sx={{ mt: 2 }}
+          >
+            Add Package
+          </Button>
+        )}
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      {isEditable && (
+        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button
+            startIcon={<AddIcon />}
+            onClick={handleAddDetail}
+            variant="contained"
+            color="primary"
+          >
+            Add Package
+          </Button>
+        </Box>
+      )}
+      <TableContainer sx={{ border: '1px solid #e0e0e0', borderRadius: 1 }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow sx={{ bgcolor: '#ff9800' }}>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Pkg #</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Type</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>L (cm)</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>W (cm)</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>H (cm)</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>CBM</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Gross (kg)</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Net (kg)</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Vol. (kg)</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Contents</TableCell>
+              {isEditable && <TableCell sx={{ color: 'white', fontWeight: 600 }}>Actions</TableCell>}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {details.map((detail, index) => (
+              <TableRow
+                key={index}
+                sx={{
+                  '&:nth-of-type(odd)': { bgcolor: '#fff8f0' },
+                  '&:hover': { bgcolor: '#ffe0b2' }
+                }}
+              >
+                <TableCell sx={{ fontWeight: 500 }}>{detail.package_number}</TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      value={detail.package_type || ''}
+                      onChange={(e) => handleUpdateDetail(index, 'package_type', e.target.value)}
+                      size="small"
+                      sx={{ width: 100 }}
+                    />
+                  ) : (
+                    detail.package_type || '-'
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      type="number"
+                      value={detail.length_cm || 0}
+                      onChange={(e) => handleUpdateDetail(index, 'length_cm', e.target.value)}
+                      size="small"
+                      sx={{ width: 80 }}
+                    />
+                  ) : (
+                    detail.length_cm
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      type="number"
+                      value={detail.width_cm || 0}
+                      onChange={(e) => handleUpdateDetail(index, 'width_cm', e.target.value)}
+                      size="small"
+                      sx={{ width: 80 }}
+                    />
+                  ) : (
+                    detail.width_cm
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      type="number"
+                      value={detail.height_cm || 0}
+                      onChange={(e) => handleUpdateDetail(index, 'height_cm', e.target.value)}
+                      size="small"
+                      sx={{ width: 80 }}
+                    />
+                  ) : (
+                    detail.height_cm
+                  )}
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600, color: '#e65100' }}>{detail.cbm}</TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      type="number"
+                      value={detail.gross_weight_kg || 0}
+                      onChange={(e) => handleUpdateDetail(index, 'gross_weight_kg', e.target.value)}
+                      size="small"
+                      sx={{ width: 80 }}
+                    />
+                  ) : (
+                    detail.gross_weight_kg
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      type="number"
+                      value={detail.net_weight_kg || 0}
+                      onChange={(e) => handleUpdateDetail(index, 'net_weight_kg', e.target.value)}
+                      size="small"
+                      sx={{ width: 80 }}
+                    />
+                  ) : (
+                    detail.net_weight_kg
+                  )}
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600, color: '#e65100' }}>{detail.volumetric_weight_kg}</TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      value={detail.contents_description || ''}
+                      onChange={(e) => handleUpdateDetail(index, 'contents_description', e.target.value)}
+                      size="small"
+                      fullWidth
+                      multiline
+                    />
+                  ) : (
+                    detail.contents_description || '-'
+                  )}
+                </TableCell>
+                {isEditable && (
+                  <TableCell>
+                    <IconButton size="small" onClick={() => handleDeleteDetail(index)} color="error">
+                      <DeleteIcon />
+                    </IconButton>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Box>
+  );
+};
+
+// Delivery Note Tab Component (Read-only)
+const DeliveryNoteTab = ({ items }) => {
+  if (!items || items.length === 0) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 6, bgcolor: '#fafafa', borderRadius: 1 }}>
+        <Typography variant="h6" color="textSecondary">
+          No delivery note items available
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <TableContainer sx={{ border: '1px solid #e0e0e0', borderRadius: 1 }}>
+      <Table size="small">
+        <TableHead>
+          <TableRow sx={{ bgcolor: '#9c27b0' }}>
+            <TableCell sx={{ color: 'white', fontWeight: 600 }}>Line #</TableCell>
+            <TableCell sx={{ color: 'white', fontWeight: 600 }}>Item Code</TableCell>
+            <TableCell sx={{ color: 'white', fontWeight: 600 }}>Description</TableCell>
+            <TableCell sx={{ color: 'white', fontWeight: 600 }}>Qty Shipped</TableCell>
+            <TableCell sx={{ color: 'white', fontWeight: 600 }}>UOM</TableCell>
+            <TableCell sx={{ color: 'white', fontWeight: 600 }}>Serial #</TableCell>
+            <TableCell sx={{ color: 'white', fontWeight: 600 }}>Batch #</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {items.map((item, index) => (
+            <TableRow
+              key={index}
+              sx={{
+                '&:nth-of-type(odd)': { bgcolor: '#f8f0fa' },
+                '&:hover': { bgcolor: '#f3e5f5' }
+              }}
+            >
+              <TableCell sx={{ fontWeight: 500 }}>{item.line_number}</TableCell>
+              <TableCell>{item.item_code || '-'}</TableCell>
+              <TableCell>{item.description || '-'}</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>{item.quantity_shipped}</TableCell>
+              <TableCell>{item.unit_of_measure || '-'}</TableCell>
+              <TableCell>{item.serial_number || '-'}</TableCell>
+              <TableCell>{item.batch_number || '-'}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+};
+
+export default InvoiceDetailView;
