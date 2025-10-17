@@ -33,6 +33,7 @@ import {
   Email as EmailIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
+  Assignment as ManifestIcon,
 } from '@mui/icons-material';
 import { loadConfirmationService } from '../services/loadConfirmationService';
 import LoadConfirmationForm from './LoadConfirmationForm';
@@ -41,6 +42,7 @@ import LoadConfirmationPrintView from './LoadConfirmationPrintView';
 import TransportRequestDialog from './TransportRequestDialog';
 import AutoTransportRequestDialog from './AutoTransportRequestDialog';
 import AutoTransportPreviewDialog from './AutoTransportPreviewDialog';
+import ManifestForm from './ManifestForm';
 import html2pdf from 'html2pdf.js';
 
 const statusColors = {
@@ -71,6 +73,7 @@ export default function LoadConfirmationList() {
   const [selectedFileData, setSelectedFileData] = useState([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [manifestDialogOpen, setManifestDialogOpen] = useState(false);
   const [emailForm, setEmailForm] = useState({
     recipientEmail: '',
     ccEmails: '',
@@ -155,6 +158,17 @@ export default function LoadConfirmationList() {
 
     try {
       await html2pdf().set(opt).from(element).save();
+
+      // Update backend to mark PDF as generated
+      try {
+        await loadConfirmationService.update(selectedLC.id, { pdf_generated: true });
+        // Refresh the list to update the UI with new flags
+        await loadData();
+      } catch (updateError) {
+        console.error('Failed to update pdf_generated flag:', updateError);
+        // Don't show error to user, PDF was still generated
+      }
+
       setPrintDialogOpen(false);
       setSelectedLC(null);
     } catch (error) {
@@ -279,6 +293,28 @@ export default function LoadConfirmationList() {
     } finally {
       setDeleting(false);
     }
+  };
+
+  // Helper function to check if manifest can be generated
+  const canGenerateManifest = (lc) => {
+    if (!lc) return false;
+    // Enable manifest generation if PDF was generated OR email was sent
+    // Handle both boolean and integer values from API
+    return Boolean(lc.pdf_generated) || Boolean(lc.email_sent);
+  };
+
+  const handleGenerateManifest = () => {
+    if (!selectedLC) return;
+    setManifestDialogOpen(true);
+    handleMenuClose();
+  };
+
+  const handleManifestSuccess = (manifest) => {
+    console.log('Manifest created:', manifest);
+    alert(`Manifest ${manifest.manifest_number} created successfully!`);
+    setManifestDialogOpen(false);
+    setSelectedLC(null);
+    loadData(); // Refresh the list
   };
 
   if (loading) {
@@ -575,6 +611,13 @@ export default function LoadConfirmationList() {
           <EmailIcon fontSize="small" sx={{ mr: 1 }} />
           Email LC
         </MenuItem>
+        <MenuItem
+          onClick={handleGenerateManifest}
+          disabled={!canGenerateManifest(selectedLC)}
+        >
+          <ManifestIcon fontSize="small" sx={{ mr: 1 }} />
+          Generate Manifest
+        </MenuItem>
         <MenuItem onClick={handleRequestTransport}>
           <ShippingIcon fontSize="small" sx={{ mr: 1 }} />
           Request Transport
@@ -837,6 +880,33 @@ export default function LoadConfirmationList() {
             {deleting ? 'Deleting...' : 'Delete'}
           </Button>
         </DialogActions>
+      </Dialog>
+
+      {/* Generate Manifest Dialog */}
+      <Dialog
+        open={manifestDialogOpen}
+        onClose={() => {
+          setManifestDialogOpen(false);
+          setSelectedLC(null);
+        }}
+        maxWidth="xl"
+        fullWidth
+      >
+        <DialogTitle sx={{ backgroundColor: '#001f3f', color: 'white', fontWeight: 600 }}>
+          Create Manifest from Load Confirmation
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2 }}>
+          {selectedLC && (
+            <ManifestForm
+              loadConfirmation={selectedLC}
+              onSuccess={handleManifestSuccess}
+              onCancel={() => {
+                setManifestDialogOpen(false);
+                setSelectedLC(null);
+              }}
+            />
+          )}
+        </DialogContent>
       </Dialog>
     </Box>
   );

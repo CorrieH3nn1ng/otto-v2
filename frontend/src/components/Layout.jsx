@@ -1,5 +1,7 @@
-import { Box, AppBar, Toolbar, Typography } from '@mui/material';
+import { useState } from 'react';
+import { Box, AppBar, Toolbar, Typography, Tooltip } from '@mui/material';
 import { styled } from '@mui/material/styles';
+import OttoChatbot from './OttoChatbot';
 
 const GradientAppBar = styled(AppBar)(({ theme }) => ({
   background: 'linear-gradient(315deg, #73e9c7 0%, #38b2ac 100%)',
@@ -9,6 +11,11 @@ const LogoContainer = styled(Box)({
   display: 'flex',
   alignItems: 'center',
   gap: '20px',
+  cursor: 'pointer',
+  transition: 'transform 0.2s',
+  '&:hover': {
+    transform: 'scale(1.05)',
+  },
 });
 
 const Logo = styled(Typography)({
@@ -37,6 +44,8 @@ const POCBadge = styled(Box)({
 });
 
 export default function Layout({ children }) {
+  const [chatbotOpen, setChatbotOpen] = useState(false);
+
   return (
     <Box sx={{
       height: '100vh',
@@ -50,14 +59,16 @@ export default function Layout({ children }) {
     }}>
       <GradientAppBar position="static" elevation={0}>
         <Toolbar sx={{ py: 1.5, px: 3 }}>
-          <LogoContainer sx={{ flex: 1 }}>
-            <Logo variant="h1">
-              🚛 OTTO
-            </Logo>
-            <Tagline variant="subtitle1">
-              Logistics on Autopilot
-            </Tagline>
-          </LogoContainer>
+          <Tooltip title="Click to chat with OTTO AI Assistant" arrow>
+            <LogoContainer sx={{ flex: 1 }} onClick={() => setChatbotOpen(true)}>
+              <Logo variant="h1">
+                🚛 OTTO
+              </Logo>
+              <Tagline variant="subtitle1">
+                Logistics on Autopilot
+              </Tagline>
+            </LogoContainer>
+          </Tooltip>
           <POCBadge>
             PRODUCTION V2
           </POCBadge>
@@ -79,6 +90,9 @@ export default function Layout({ children }) {
           {children}
         </Box>
       </Box>
+
+      {/* OTTO Chatbot Modal */}
+      <OttoChatbot open={chatbotOpen} onClose={() => setChatbotOpen(false)} />
     </Box>
   );
 }
