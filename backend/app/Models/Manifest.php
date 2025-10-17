@@ -12,10 +12,18 @@ class Manifest extends Model
         'manifest_number',
         'load_confirmation_id',
         'export_date',
+        'border_post',
+        'customs_office',
         'customs_status',
         'feri_application_date',
         'certificate_of_destination_date',
         'status',
+        'contract_number',
+        'area_and_phase',
+        'project_code',
+        'cod_number',
+        'driver_instruction_1',
+        'driver_instruction_2',
     ];
 
     protected $casts = [
