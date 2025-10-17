@@ -36,6 +36,7 @@ import {
   LocalShipping as DeliveredIcon,
 } from '@mui/icons-material';
 import { manifestService } from '../services/manifestService';
+import ManifestDetailView from './ManifestDetailView';
 
 const statusColors = {
   draft: 'default',
@@ -62,6 +63,7 @@ export default function ManifestList() {
   const [anchorEl, setAnchorEl] = useState(null);
   const [selectedManifest, setSelectedManifest] = useState(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [detailViewOpen, setDetailViewOpen] = useState(false);
   const [editFormData, setEditFormData] = useState({
     contract_number: '',
     area_and_phase: '',
@@ -140,8 +142,7 @@ export default function ManifestList() {
   };
 
   const handleViewDetails = () => {
-    // TODO: Open detail view
-    console.log('View details for manifest:', selectedManifest);
+    setDetailViewOpen(true);
     handleMenuClose();
   };
 
@@ -456,6 +457,35 @@ export default function ManifestList() {
             }}
           >
             Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Detail View Dialog */}
+      <Dialog
+        open={detailViewOpen}
+        onClose={() => {
+          setDetailViewOpen(false);
+          setSelectedManifest(null);
+        }}
+        maxWidth="xl"
+        fullWidth
+      >
+        <DialogTitle sx={{ backgroundColor: '#001f3f', color: 'white', fontWeight: 600 }}>
+          Manifest Details - {selectedManifest?.manifest_number}
+        </DialogTitle>
+        <DialogContent sx={{ p: 0 }}>
+          {selectedManifest && <ManifestDetailView manifest={selectedManifest} />}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button
+            onClick={() => {
+              setDetailViewOpen(false);
+              setSelectedManifest(null);
+            }}
+            sx={{ color: '#666' }}
+          >
+            Close
           </Button>
         </DialogActions>
       </Dialog>
