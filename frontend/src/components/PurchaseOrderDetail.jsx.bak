@@ -1,0 +1,361 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Box,
+  Paper,
+  Grid,
+  Typography,
+  Chip,
+  Button,
+  CircularProgress,
+  Alert,
+  Divider,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Card,
+  CardContent
+} from '@mui/material';
+import {
+  ArrowBack as ArrowBackIcon,
+  Warning as WarningIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon
+} from '@mui/icons-material';
+import { useNavigate, useParams } from 'react-router-dom';
+import axios from 'axios';
+import Layout from './Layout';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+
+const PurchaseOrderDetail = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [po, setPO] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetchPO();
+  }, [id]);
+
+  const fetchPO = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/purchase-orders/${id}`);
+      setPO(response.data);
+    } catch (err) {
+      console.error('Error fetching PO:', err);
+      setError('Failed to load Purchase Order');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getUsageAlert = (stats) => {
+    const percentage = stats.usage_percentage || 0;
+
+    if (percentage > 80) {
+      return {
+        severity: 'error',
+        icon: <ErrorIcon />,
+        title: 'CRITICAL: Budget Usage Over 80%',
+        message: 'Management intervention required. PO budget is critically low.',
+        color: '#c62828'
+      };
+    } else if (percentage > 50) {
+      return {
+        severity: 'warning',
+        icon: <WarningIcon />,
+        title: 'Warning: Budget Usage Over 50%',
+        message: 'Monitor budget closely. Consider reviewing remaining allocations.',
+        color: '#f57c00'
+      };
+    } else {
+      return {
+        severity: 'success',
+        icon: <CheckCircleIcon />,
+        title: 'Budget Status: Healthy',
+        message: 'PO budget is within safe limits.',
+        color: '#2e7d32'
+      };
+    }
+  };
+
+  const getVarianceColor = (varianceColor) => {
+    switch (varianceColor) {
+      case 'success':
+        return { bgcolor: '#e8f5e9', color: '#2e7d32' };
+      case 'warning':
+        return { bgcolor: '#fff9c4', color: '#f57c00' };
+      case 'danger':
+        return { bgcolor: '#ffebee', color: '#c62828' };
+      default:
+        return { bgcolor: '#f5f5f5', color: '#666' };
+    }
+  };
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error || !po) {
+    return (
+      <Box>
+        <Alert severity="error">{error || 'Purchase Order not found'}</Alert>
+        <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/purchase-orders')} sx={{ mt: 2 }}>
+          Back to PO List
+        </Button>
+      </Box>
+    );
+  }
+
+  const alert = getUsageAlert(po.budget_stats);
+
+  return (
+    <Layout>
+      <Box sx={{ p: 3, overflow: 'auto', flex: 1 }}>
+        {/* Header */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Box>
+          <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/purchase-orders')} sx={{ mb: 1 }}>
+            Back to PO List
+          </Button>
+          <Typography variant="h4" fontWeight="bold">
+            {po.invoice_number}
+          </Typography>
+          <Typography variant="body2" color="textSecondary">
+            Purchase Order Details
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Budget Alert */}
+      <Alert
+        severity={alert.severity}
+        icon={alert.icon}
+        sx={{ mb: 3, borderLeft: `4px solid ${alert.color}` }}
+      >
+        <Typography variant="h6" fontWeight="bold">{alert.title}</Typography>
+        <Typography variant="body2">{alert.message}</Typography>
+      </Alert>
+
+      {/* Budget Overview Cards */}
+      <Grid container spacing={3} mb={3}>
+        <Grid item xs={12} md={3}>
+          <Card>
+            <CardContent>
+              <Typography variant="caption" color="textSecondary">PO Budget</Typography>
+              <Typography variant="h5" fontWeight="bold">
+                {po.currency} {parseFloat(po.po_budget_amount).toLocaleString()}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Card sx={{ bgcolor: '#e3f2fd' }}>
+            <CardContent>
+              <Typography variant="caption" color="textSecondary">Used</Typography>
+              <Typography variant="h5" fontWeight="bold" color="primary">
+                {po.currency} {parseFloat(po.budget_stats.total_usage).toLocaleString()}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Card sx={{ bgcolor: '#e8f5e9' }}>
+            <CardContent>
+              <Typography variant="caption" color="textSecondary">Remaining</Typography>
+              <Typography variant="h5" fontWeight="bold" color="success.main">
+                {po.currency} {parseFloat(po.budget_stats.remaining_budget).toLocaleString()}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Card sx={{ bgcolor: getUsageAlert(po.budget_stats).severity === 'error' ? '#ffebee' : '#fff9c4' }}>
+            <CardContent>
+              <Typography variant="caption" color="textSecondary">Usage</Typography>
+              <Typography variant="h5" fontWeight="bold">
+                {po.budget_stats.usage_percentage.toFixed(1)}%
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* PO Details */}
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" fontWeight="bold" gutterBottom>
+          Purchase Order Information
+        </Typography>
+        <Divider sx={{ mb: 2 }} />
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <Typography variant="caption" color="textSecondary">PO Number</Typography>
+            <Typography variant="body1" fontWeight="bold">{po.invoice_number}</Typography>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="caption" color="textSecondary">PO Date</Typography>
+            <Typography variant="body1">
+              {po.invoice_date ? new Date(po.invoice_date).toLocaleDateString() : '-'}
+            </Typography>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="caption" color="textSecondary">Customer</Typography>
+            <Typography variant="body1" fontWeight="bold">{po.customer?.name || '-'}</Typography>
+            {po.customer_account_code && (
+              <Typography variant="caption" color="textSecondary">
+                Account: {po.customer_account_code}
+              </Typography>
+            )}
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="caption" color="textSecondary">Supplier</Typography>
+            <Typography variant="body1">{po.supplier?.name || '-'}</Typography>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="caption" color="textSecondary">Customer Reference</Typography>
+            <Typography variant="body1">{po.customer_reference || '-'}</Typography>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="caption" color="textSecondary">RFQ Number</Typography>
+            <Typography variant="body1">{po.rfq_number || '-'}</Typography>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="caption" color="textSecondary">End User</Typography>
+            <Typography variant="body1">{po.end_user || '-'}</Typography>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Typography variant="caption" color="textSecondary">Expected Weight</Typography>
+            <Typography variant="body1">{po.expected_weight_kg ? `${po.expected_weight_kg} kg` : '-'}</Typography>
+          </Grid>
+          {po.customs_declaration_number && (
+            <Grid item xs={12} md={6}>
+              <Typography variant="caption" color="textSecondary">Customs Declaration</Typography>
+              <Typography variant="body1">{po.customs_declaration_number}</Typography>
+            </Grid>
+          )}
+        </Grid>
+      </Paper>
+
+      {/* Linked Invoices */}
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" fontWeight="bold" gutterBottom>
+          Linked Commercial Invoices ({po.linked_invoices?.length || 0})
+        </Typography>
+        <Divider sx={{ mb: 2 }} />
+
+        {!po.linked_invoices || po.linked_invoices.length === 0 ? (
+          <Typography color="textSecondary" sx={{ py: 3, textAlign: 'center' }}>
+            No commercial invoices linked to this PO yet
+          </Typography>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: '#f5f5f5' }}>
+                  <TableCell><strong>Invoice #</strong></TableCell>
+                  <TableCell><strong>Date</strong></TableCell>
+                  <TableCell><strong>Amount</strong></TableCell>
+                  <TableCell><strong>Weight</strong></TableCell>
+                  <TableCell><strong>Budget Variance</strong></TableCell>
+                  <TableCell><strong>Status</strong></TableCell>
+                  <TableCell><strong>License</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {po.linked_invoices.map((invoice) => {
+                  const varianceStyle = getVarianceColor(invoice.variance_color);
+                  return (
+                    <TableRow key={invoice.id} hover onClick={() => navigate(`/invoices/${invoice.id}`)} sx={{ cursor: 'pointer' }}>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight="bold">{invoice.invoice_number}</Typography>
+                      </TableCell>
+                      <TableCell>
+                        {invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString() : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {invoice.currency} {parseFloat(invoice.total_amount).toLocaleString()}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        {invoice.actual_weight_kg ? `${invoice.actual_weight_kg} kg` : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {invoice.budget_variance !== null ? (
+                          <Chip
+                            label={`${invoice.budget_variance >= 0 ? '+' : ''}${invoice.budget_variance.toFixed(2)}`}
+                            size="small"
+                            sx={{
+                              bgcolor: varianceStyle.bgcolor,
+                              color: varianceStyle.color,
+                              fontWeight: 'bold'
+                            }}
+                          />
+                        ) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        <Chip label={invoice.status} size="small" />
+                      </TableCell>
+                      <TableCell>
+                        {invoice.customs_declaration_number || '-'}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Paper>
+
+      {/* Linked Licenses */}
+      {po.linked_licenses && po.linked_licenses.length > 0 && (
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" fontWeight="bold" gutterBottom>
+            Linked Import Declarations / Licenses ({po.linked_licenses.length})
+          </Typography>
+          <Divider sx={{ mb: 2 }} />
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: '#f5f5f5' }}>
+                  <TableCell><strong>Invoice #</strong></TableCell>
+                  <TableCell><strong>License #</strong></TableCell>
+                  <TableCell><strong>Amount</strong></TableCell>
+                  <TableCell><strong>Weight</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {po.linked_licenses.map((license, index) => (
+                  <TableRow key={index} hover>
+                    <TableCell>{license.invoice_number}</TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="bold">
+                        {license.customs_declaration_number}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>{po.currency} {parseFloat(license.total_amount).toLocaleString()}</TableCell>
+                    <TableCell>{license.actual_weight_kg ? `${license.actual_weight_kg} kg` : '-'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
+      </Box>
+    </Layout>
+  );
+};
+
+export default PurchaseOrderDetail;

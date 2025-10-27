@@ -28,4 +28,22 @@ class Customer extends Model
     {
         return $this->hasMany(Invoice::class);
     }
+
+    public function contacts(): HasMany
+    {
+        return $this->hasMany(CustomerContact::class);
+    }
+
+    /**
+     * Get the default DRC Nucleus contact for this customer
+     *
+     * @return CustomerContact|null
+     */
+    public function getDrcContact()
+    {
+        return $this->contacts()
+            ->where('contact_type', 'drc_nucleus')
+            ->where('is_default', true)
+            ->first();
+    }
 }

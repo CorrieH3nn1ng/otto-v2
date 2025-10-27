@@ -23,6 +23,10 @@ import {
   DialogContent,
   DialogActions,
   TextField,
+  Select,
+  InputLabel,
+  FormControl,
+  InputAdornment,
 } from '@mui/material';
 import {
   MoreVert as MoreVertIcon,
@@ -34,7 +38,12 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Assignment as ManifestIcon,
+  Search as SearchIcon,
+  FilterList as FilterListIcon,
+  ArrowUpward as ArrowUpwardIcon,
+  ArrowDownward as ArrowDownwardIcon,
 } from '@mui/icons-material';
+import { useSnackbar } from 'notistack';
 import { loadConfirmationService } from '../services/loadConfirmationService';
 import LoadConfirmationForm from './LoadConfirmationForm';
 import LoadConfirmationDetailView from './LoadConfirmationDetailView';
@@ -55,6 +64,7 @@ const statusColors = {
 };
 
 export default function LoadConfirmationList() {
+  const { enqueueSnackbar } = useSnackbar();
   const [loadConfirmations, setLoadConfirmations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -74,6 +84,10 @@ export default function LoadConfirmationList() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [manifestDialogOpen, setManifestDialogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [orderBy, setOrderBy] = useState('id');
+  const [order, setOrder] = useState('desc');
   const [emailForm, setEmailForm] = useState({
     recipientEmail: '',
     ccEmails: '',
@@ -110,6 +124,11 @@ export default function LoadConfirmationList() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setPage(0);
+  }, [searchTerm, statusFilter]);
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
@@ -227,10 +246,18 @@ export default function LoadConfirmationList() {
     loadData(); // Refresh the list
   };
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (!selectedLC) return;
-    setEditDialogOpen(true);
-    handleMenuClose();
+    try {
+      // Fetch fresh data from API to ensure we have all fields
+      const freshData = await loadConfirmationService.getById(selectedLC.id);
+      setSelectedLC(freshData);
+      setEditDialogOpen(true);
+      handleMenuClose();
+    } catch (error) {
+      console.error('Error fetching load confirmation:', error);
+      alert('Failed to load load confirmation details');
+    }
   };
 
   const handleEditSuccess = (updatedLC) => {
@@ -311,11 +338,88 @@ export default function LoadConfirmationList() {
 
   const handleManifestSuccess = (manifest) => {
     console.log('Manifest created:', manifest);
-    alert(`Manifest ${manifest.manifest_number} created successfully!`);
+    enqueueSnackbar(`Manifest ${manifest.manifest_number} created successfully!`, {
+      variant: 'success',
+      autoHideDuration: 5000
+    });
     setManifestDialogOpen(false);
     setSelectedLC(null);
     loadData(); // Refresh the list
   };
+
+  // Sorting function
+  const handleRequestSort = (property) => {
+    const isAsc = orderBy === property && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy(property);
+  };
+
+  const getComparatorValue = (lc, property) => {
+    switch (property) {
+      case 'file_reference':
+        return lc.file_reference || lc.lc_number || '';
+      case 'confirmation_date':
+        return lc.confirmation_date || lc.date_issued || '';
+      case 'collection_date':
+        return lc.collection_date || '';
+      case 'transporter':
+        return lc.transporter?.company_name || lc.transporter_name || '';
+      case 'vehicle_type':
+        return lc.vehicle_type || '';
+      case 'truck_registration':
+        return lc.truck_registration || '';
+      case 'status':
+        return lc.status || 'draft';
+      default:
+        return lc[property] || '';
+    }
+  };
+
+  // Filter and sort load confirmations
+  const getFilteredLoadConfirmations = () => {
+    let filtered = [...loadConfirmations];
+
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const search = searchTerm.toLowerCase();
+      filtered = filtered.filter(lc => {
+        const fileRef = (lc.file_reference || lc.lc_number || '').toLowerCase();
+        const transporter = (lc.transporter?.company_name || lc.transporter_name || '').toLowerCase();
+        const truckReg = (lc.truck_registration || '').toLowerCase();
+        const trailer1 = (lc.trailer_1_registration || '').toLowerCase();
+        const trailer2 = (lc.trailer_2_registration || '').toLowerCase();
+
+        return fileRef.includes(search) ||
+               transporter.includes(search) ||
+               truckReg.includes(search) ||
+               trailer1.includes(search) ||
+               trailer2.includes(search);
+      });
+    }
+
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(lc => (lc.status || 'draft') === statusFilter);
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      const aValue = getComparatorValue(a, orderBy);
+      const bValue = getComparatorValue(b, orderBy);
+
+      if (aValue < bValue) {
+        return order === 'asc' ? -1 : 1;
+      }
+      if (aValue > bValue) {
+        return order === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+
+    return filtered;
+  };
+
+  const filteredLoadConfirmations = getFilteredLoadConfirmations();
 
   if (loading) {
     return (
@@ -466,23 +570,140 @@ export default function LoadConfirmationList() {
         </Box>
       </Box>
 
+      {/* Compact Filter Section */}
+      <Paper sx={{ p: 2, mb: 2, bgcolor: '#f8f9fa' }}>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+          <TextField
+            size="small"
+            placeholder="Search by file ref, transporter, or registration..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            }}
+            sx={{ minWidth: 300, bgcolor: 'white' }}
+          />
+          <FormControl size="small" sx={{ minWidth: 180, bgcolor: 'white' }}>
+            <InputLabel>Status</InputLabel>
+            <Select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              label="Status"
+              startAdornment={
+                <InputAdornment position="start">
+                  <FilterListIcon fontSize="small" />
+                </InputAdornment>
+              }
+            >
+              <MenuItem value="all">All Statuses</MenuItem>
+              <MenuItem value="draft">Draft</MenuItem>
+              <MenuItem value="pending">Pending</MenuItem>
+              <MenuItem value="confirmed">Confirmed</MenuItem>
+              <MenuItem value="transport_confirmed">Transport Confirmed</MenuItem>
+              <MenuItem value="ready_for_manifest">Ready for Manifest</MenuItem>
+              <MenuItem value="in_manifest">In Manifest</MenuItem>
+              <MenuItem value="in_transit">In Transit</MenuItem>
+              <MenuItem value="delivered">Delivered</MenuItem>
+              <MenuItem value="cancelled">Cancelled</MenuItem>
+            </Select>
+          </FormControl>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
+            Showing {filteredLoadConfirmations.length} of {loadConfirmations.length} load confirmations
+          </Typography>
+        </Box>
+      </Paper>
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
             <TableRow sx={{ bgcolor: '#001f3f' }}>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>File Reference</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Confirmation Date</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Collection Date</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Transporter</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Vehicle Type</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Truck Reg</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Status</TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('file_reference')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  File Reference
+                  {orderBy === 'file_reference' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('confirmation_date')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Confirmation Date
+                  {orderBy === 'confirmation_date' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('collection_date')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Collection Date
+                  {orderBy === 'collection_date' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('transporter')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Transporter
+                  {orderBy === 'transporter' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('vehicle_type')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Vehicle Type
+                  {orderBy === 'vehicle_type' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('truck_registration')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Truck Reg
+                  {orderBy === 'truck_registration' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('status')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Status
+                  {orderBy === 'status' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
               <TableCell sx={{ color: 'white', fontWeight: 600 }}>Equipment</TableCell>
               <TableCell align="right" sx={{ color: 'white', fontWeight: 600 }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {loadConfirmations
+            {filteredLoadConfirmations
               .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
               .map((lc) => (
                 <TableRow
@@ -587,7 +808,7 @@ export default function LoadConfirmationList() {
       <TablePagination
         rowsPerPageOptions={[5, 10, 25, 50]}
         component="div"
-        count={loadConfirmations.length}
+        count={filteredLoadConfirmations.length}
         rowsPerPage={rowsPerPage}
         page={page}
         onPageChange={handleChangePage}

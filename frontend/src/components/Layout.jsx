@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Box, AppBar, Toolbar, Typography, Tooltip } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Tooltip, Button } from '@mui/material';
 import { styled } from '@mui/material/styles';
+import { useNavigate, useLocation } from 'react-router-dom';
 import OttoChatbot from './OttoChatbot';
 
 const GradientAppBar = styled(AppBar)(({ theme }) => ({
@@ -45,6 +46,13 @@ const POCBadge = styled(Box)({
 
 export default function Layout({ children }) {
   const [chatbotOpen, setChatbotOpen] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const navButtons = [
+    { label: 'Dashboard', path: '/', icon: '📊' },
+    { label: 'Purchase Orders', path: '/purchase-orders', icon: '📋' },
+  ];
 
   return (
     <Box sx={{
@@ -61,6 +69,11 @@ export default function Layout({ children }) {
         <Toolbar sx={{ py: 1.5, px: 3 }}>
           <Tooltip title="Click to chat with OTTO AI Assistant" arrow>
             <LogoContainer sx={{ flex: 1 }} onClick={() => setChatbotOpen(true)}>
+              <img
+                src="/nucleusmlsmall_1.gif"
+                alt="Nucleus Mining Logistics"
+                style={{ height: '50px', marginRight: '15px' }}
+              />
               <Logo variant="h1">
                 🚛 OTTO
               </Logo>
@@ -69,6 +82,32 @@ export default function Layout({ children }) {
               </Tagline>
             </LogoContainer>
           </Tooltip>
+
+          {/* Navigation Buttons */}
+          <Box sx={{ display: 'flex', gap: 2, mr: 3 }}>
+            {navButtons.map((btn) => (
+              <Button
+                key={btn.path}
+                onClick={() => navigate(btn.path)}
+                sx={{
+                  color: 'white',
+                  fontWeight: location.pathname === btn.path ? 700 : 500,
+                  textTransform: 'none',
+                  fontSize: '14px',
+                  borderBottom: location.pathname === btn.path ? '3px solid white' : '3px solid transparent',
+                  borderRadius: 0,
+                  px: 2,
+                  '&:hover': {
+                    bgcolor: 'rgba(255,255,255,0.15)',
+                    borderBottom: '3px solid white',
+                  }
+                }}
+              >
+                {btn.icon} {btn.label}
+              </Button>
+            ))}
+          </Box>
+
           <POCBadge>
             PRODUCTION V2
           </POCBadge>

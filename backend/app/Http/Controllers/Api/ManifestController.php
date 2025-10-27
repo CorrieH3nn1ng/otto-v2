@@ -7,6 +7,8 @@ use App\Models\Manifest;
 use App\Models\Invoice;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Barryvdh\DomPDF\Facade\Pdf;
+use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class ManifestController extends Controller
 {
@@ -15,7 +17,12 @@ class ManifestController extends Controller
      */
     public function index(): JsonResponse
     {
-        $manifests = Manifest::with(['loadConfirmation.transporter', 'invoices'])
+        $manifests = Manifest::with([
+            'loadConfirmation.transporter',
+            'invoices.customer',
+            'invoices.supplier',
+            'invoices.packingDetails'
+        ])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -30,7 +37,8 @@ class ManifestController extends Controller
         $manifest = Manifest::with([
             'loadConfirmation.transporter',
             'invoices.customer',
-            'invoices.supplier'
+            'invoices.supplier',
+            'invoices.packingDetails'
         ])->findOrFail($id);
 
         return response()->json($manifest);
@@ -45,8 +53,19 @@ class ManifestController extends Controller
             'manifest_number' => 'required|string|unique:manifests',
             'load_confirmation_id' => 'required|exists:load_confirmations,id',
             'export_date' => 'required|date',
+            'border_post' => 'nullable|string',
+            'customs_office' => 'nullable|string',
+            'contract_number' => 'nullable|string',
+            'area_and_phase' => 'nullable|string',
+            'project_code' => 'nullable|string',
+            'driver_instruction_1' => 'nullable|string',
+            'driver_instruction_2' => 'nullable|string',
             'invoice_ids' => 'required|array',
             'invoice_ids.*' => 'exists:invoices,id',
+            // Load confirmation fields to update
+            'clearing_agent' => 'nullable|string',
+            'entry_agent' => 'nullable|string',
+            'commodity_description' => 'nullable|string',
         ]);
 
         // Create manifest
@@ -54,9 +73,34 @@ class ManifestController extends Controller
             'manifest_number' => $validated['manifest_number'],
             'load_confirmation_id' => $validated['load_confirmation_id'],
             'export_date' => $validated['export_date'],
+            'border_post' => $validated['border_post'] ?? null,
+            'customs_office' => $validated['customs_office'] ?? null,
+            'contract_number' => $validated['contract_number'] ?? null,
+            'area_and_phase' => $validated['area_and_phase'] ?? null,
+            'project_code' => $validated['project_code'] ?? null,
+            'driver_instruction_1' => $validated['driver_instruction_1'] ?? null,
+            'driver_instruction_2' => $validated['driver_instruction_2'] ?? null,
             'customs_status' => 'pending',
             'status' => 'draft',
         ]);
+
+        // Update load confirmation fields if provided
+        if (isset($validated['clearing_agent']) || isset($validated['entry_agent']) || isset($validated['commodity_description'])) {
+            $loadConfirmation = \App\Models\LoadConfirmation::find($validated['load_confirmation_id']);
+            if ($loadConfirmation) {
+                $updateData = [];
+                if (isset($validated['clearing_agent'])) {
+                    $updateData['clearing_agent'] = $validated['clearing_agent'];
+                }
+                if (isset($validated['entry_agent'])) {
+                    $updateData['entry_agent'] = $validated['entry_agent'];
+                }
+                if (isset($validated['commodity_description'])) {
+                    $updateData['commodity_description'] = $validated['commodity_description'];
+                }
+                $loadConfirmation->update($updateData);
+            }
+        }
 
         // Attach invoices to manifest
         $manifest->invoices()->attach($validated['invoice_ids']);
@@ -72,7 +116,12 @@ class ManifestController extends Controller
             }
         }
 
-        return response()->json($manifest->load(['loadConfirmation', 'invoices']), 201);
+        return response()->json($manifest->load([
+            'loadConfirmation.transporter',
+            'invoices.customer',
+            'invoices.supplier',
+            'invoices.packingDetails'
+        ]), 201);
     }
 
     /**
@@ -238,5 +287,40 @@ class ManifestController extends Controller
             'message' => 'Invoices detached successfully',
             'manifest' => $manifest->load('invoices')
         ]);
+    }
+
+    /**
+     * Download manifest as PDF
+     */
+    public function downloadPdf(int $id)
+    {
+        $manifest = Manifest::with([
+            'loadConfirmation.transporter',
+            'invoices.customer',
+            'invoices.supplier',
+            'invoices.packingDetails'
+        ])->findOrFail($id);
+
+        $loadConfirmation = $manifest->loadConfirmation;
+
+        // Generate QR code as SVG (doesn't require imagick extension)
+        $qrCode = QrCode::size(200)
+            ->margin(0)
+            ->generate($manifest->manifest_number);
+
+        // Generate PDF
+        $pdf = Pdf::loadView('pdf.manifest', [
+            'manifest' => $manifest,
+            'loadConfirmation' => $loadConfirmation,
+            'qrCode' => $qrCode,
+        ]);
+
+        // Set paper size and orientation to landscape
+        $pdf->setPaper('a4', 'landscape');
+
+        // Download with filename using manifest number
+        $filename = 'Manifest_' . $manifest->manifest_number . '.pdf';
+
+        return $pdf->download($filename);
     }
 }

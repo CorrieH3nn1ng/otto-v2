@@ -18,7 +18,12 @@ class LoadConfirmationController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = LoadConfirmation::with(['transporter', 'invoices']);
+        $query = LoadConfirmation::with([
+            'transporter',
+            'invoices.supplier',
+            'invoices.customer',
+            'invoices.packingDetails'
+        ]);
 
         // Filter by status if provided
         if ($request->has('status')) {
@@ -168,7 +173,20 @@ class LoadConfirmationController extends Controller
             'email_sent' => 'boolean',
         ]);
 
+        // Check if file_reference is being changed
+        $oldFileReference = $loadConfirmation->file_reference;
+        $newFileReference = $validated['file_reference'] ?? $oldFileReference;
+
         $loadConfirmation->update($validated);
+
+        // BIDIRECTIONAL SYNC: If file_reference changed, update packing_details that reference the old name
+        if ($oldFileReference !== $newFileReference) {
+            $updatedCount = \DB::table('packing_details')
+                ->where('file_name', $oldFileReference)
+                ->update(['file_name' => $newFileReference]);
+
+            \Log::info("Load confirmation {$loadConfirmation->id} file_reference changed from '{$oldFileReference}' to '{$newFileReference}'. Updated {$updatedCount} packing_details records.");
+        }
 
         return response()->json($loadConfirmation->load(['transporter', 'invoices']));
     }

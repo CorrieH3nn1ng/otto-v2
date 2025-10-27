@@ -40,6 +40,7 @@ import {
   ArrowForward as ArrowForwardIcon,
   LocalShipping as TruckIcon,
 } from '@mui/icons-material';
+import { useSnackbar } from 'notistack';
 import InvoiceDetailView from './InvoiceDetailView';
 import axios from 'axios';
 
@@ -99,7 +100,7 @@ const InvoiceTabbedView = ({ invoice, mode = 'readonly', onSave }) => {
           <InvoiceDetailView invoice={invoice} mode={mode} onSave={onSave} />
         )}
         {currentTab === 1 && (
-          <WorkflowRequirementsTab invoice={invoice} />
+          <WorkflowRequirementsTab invoice={invoice} onSave={onSave} />
         )}
         {currentTab === 2 && (
           <DocumentsTab invoice={invoice} />
@@ -110,7 +111,8 @@ const InvoiceTabbedView = ({ invoice, mode = 'readonly', onSave }) => {
 };
 
 // Workflow & Requirements Tab Component
-const WorkflowRequirementsTab = ({ invoice }) => {
+const WorkflowRequirementsTab = ({ invoice, onSave }) => {
+  const { enqueueSnackbar } = useSnackbar();
   const [qcStatus, setQcStatus] = useState(invoice.qc_status || 'pending');
   const [bvStatus, setBvStatus] = useState(invoice.bv_status || 'pending');
   const [qcNotes, setQcNotes] = useState('');
@@ -176,14 +178,14 @@ const WorkflowRequirementsTab = ({ invoice }) => {
         setBvStatus(response.data.bv_status);
       }
 
-      alert(response.data.message || 'QC status updated successfully');
+      enqueueSnackbar(response.data.message || 'QC status updated successfully', { variant: 'success' });
       setQcNotes('');
       setQcScheduledDate('');
       // Refresh activities after update
       fetchActivities();
     } catch (error) {
       console.error('Error:', error);
-      alert('Failed to update QC status: ' + (error.response?.data?.error || error.message));
+      enqueueSnackbar('Failed to update QC status: ' + (error.response?.data?.error || error.message), { variant: 'error' });
     } finally {
       setUpdatingQc(false);
     }
@@ -204,14 +206,14 @@ const WorkflowRequirementsTab = ({ invoice }) => {
         invoice.has_bv_certificate = true;
       }
 
-      alert('BV status updated successfully');
+      enqueueSnackbar('BV status updated successfully', { variant: 'success' });
       setBvNotes('');
       setBvScheduledDate('');
       // Refresh activities after update
       fetchActivities();
     } catch (error) {
       console.error('Error:', error);
-      alert('Failed to update BV status: ' + (error.response?.data?.error || error.message));
+      enqueueSnackbar('Failed to update BV status: ' + (error.response?.data?.error || error.message), { variant: 'error' });
     } finally {
       setUpdatingBv(false);
     }
@@ -219,7 +221,7 @@ const WorkflowRequirementsTab = ({ invoice }) => {
 
   const handleMarkReadyForTransport = async () => {
     if (!readyForTransport) {
-      alert('Please confirm the invoice is ready for transport by checking the box');
+      enqueueSnackbar('Please confirm the invoice is ready for transport by checking the box', { variant: 'warning' });
       return;
     }
 
@@ -231,17 +233,23 @@ const WorkflowRequirementsTab = ({ invoice }) => {
       });
 
       // Update local state
+      invoice.status = response.data.invoice.status;
       invoice.ready_dispatch_at = response.data.invoice.ready_dispatch_at;
       invoice.current_stage = 'ready_dispatch';
 
-      alert('Invoice marked as ready for transport successfully!');
+      enqueueSnackbar('Invoice marked as ready for transport successfully!', { variant: 'success' });
       setTransportNotes('');
       setReadyForTransport(false);
       // Refresh activities after update
       fetchActivities();
+
+      // Notify parent to refresh the invoice list
+      if (onSave) {
+        onSave(invoice);
+      }
     } catch (error) {
       console.error('Error:', error);
-      alert('Failed to mark ready for transport: ' + (error.response?.data?.error || error.message));
+      enqueueSnackbar('Failed to mark ready for transport: ' + (error.response?.data?.error || error.message), { variant: 'error' });
     } finally {
       setUpdatingTransport(false);
     }
@@ -553,6 +561,7 @@ const WorkflowRequirementsTab = ({ invoice }) => {
 
 // Documents Tab Component
 const DocumentsTab = ({ invoice }) => {
+  const { enqueueSnackbar } = useSnackbar();
   const [documentType, setDocumentType] = useState('invoice');
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -577,7 +586,7 @@ const DocumentsTab = ({ invoice }) => {
 
   const handleUpload = async () => {
     if (!selectedFile) {
-      alert('Please select a file');
+      enqueueSnackbar('Please select a file', { variant: 'warning' });
       return;
     }
 
@@ -595,10 +604,10 @@ const DocumentsTab = ({ invoice }) => {
       // Refresh documents list
       setDocuments([...documents, response.data.document]);
       setSelectedFile(null);
-      alert('Document uploaded successfully!');
+      enqueueSnackbar('Document uploaded successfully!', { variant: 'success' });
     } catch (error) {
       console.error('Upload error:', error);
-      alert('Failed to upload document: ' + (error.response?.data?.message || error.message));
+      enqueueSnackbar('Failed to upload document: ' + (error.response?.data?.message || error.message), { variant: 'error' });
     } finally {
       setUploading(false);
     }

@@ -1,0 +1,189 @@
+{
+  "name": "OTTO - Load Confirmation Extraction (Gemini)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "otto-load-confirmation-extract",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "41d37130-572d-4ef7-8559-7636eefc1eb1",
+      "name": "Webhook - Load Confirmation",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        320
+      ],
+      "webhookId": "otto-load-confirmation-extract"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract PDF base64 from webhook body\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const pdfBase64 = item.json.body?.pdf_base64 || item.json.pdf_base64;\n  \n  if (!pdfBase64) {\n    throw new Error('No pdf_base64 found in request');\n  }\n  \n  results.push({\n    json: {\n      uploadedAt: new Date().toISOString()\n    },\n    binary: {\n      data: {\n        data: pdfBase64,\n        mimeType: 'application/pdf',\n        fileExtension: 'pdf',\n        fileName: 'load-confirmation.pdf'\n      }\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "eb3ec840-732c-4f49-a2bb-89a19375e6c0",
+      "name": "Prepare PDF Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -384,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Gemini response\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  let responseText;\n  \n  // Extract text from Gemini response\n  if (item.json.candidates && item.json.candidates[0]) {\n    responseText = item.json.candidates[0].content.parts[0].text;\n  } else {\n    throw new Error('No response from Gemini');\n  }\n  \n  let jsonText = responseText.trim();\n  \n  // Remove markdown code blocks if present\n  if (jsonText.startsWith('```json')) {\n    jsonText = jsonText.replace(/```json\\n?/g, '').replace(/\\n?```$/g, '');\n  } else if (jsonText.startsWith('```')) {\n    jsonText = jsonText.replace(/```\\n?/g, '').replace(/\\n?```$/g, '');\n  }\n  \n  let extractedData;\n  try {\n    extractedData = JSON.parse(jsonText);\n  } catch (error) {\n    // Try to find JSON in the text\n    const jsonMatch = jsonText.match(/\\{[\\s\\S]*\\}/);\n    if (jsonMatch) {\n      extractedData = JSON.parse(jsonMatch[0]);\n    } else {\n      throw new Error(`Failed to parse Gemini response as JSON: ${error.message}\\n\\nResponse: ${jsonText}`);\n    }\n  }\n  \n  // Extract invoice_number from the data\n  const invoiceNumber = extractedData.invoice_number;\n  \n  // Remove invoice_number from extracted_data\n  delete extractedData.invoice_number;\n  \n  results.push({\n    json: {\n      invoice_number: invoiceNumber,\n      extracted_data: extractedData,\n      raw_gemini_response: responseText,\n      processed_at: new Date().toISOString()\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "9c0a9b5e-de6b-4342-a0b5-8aa34b2d6535",
+      "name": "Parse Gemini Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/webhook/load-confirmation",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "4058e43a-00ea-4c3f-bd87-27e7b96ba4cb",
+      "name": "Send to Laravel Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        320
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "bb55a741-f4f5-4919-b3f3-2a1bf1275c73",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        944,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "document",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.0-flash-exp",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.0-flash-exp"
+        },
+        "text": "You are extracting information from a scanned invoice that has handwritten transport/loading details. Extract BOTH the printed invoice information AND the handwritten transport details:\n\n**PRINTED INFORMATION:**\n1. Invoice Number (look for 'Invoice No:', 'Invoice Number:', etc.)\n\n**HANDWRITTEN TRANSPORT DETAILS:**\n1. Total weight (in KG) - usually written as 'Total weight: X KG'\n2. Container/Package numbers - usually 3-5 numbered items with codes like 'JN42XZGP'\n3. Driver's Full Name\n4. Driver's Contact Number\n5. Date Loaded (format: YYYY-MM-DD)\n6. Time (format: HH:MM)\n7. Transporter name\n8. Vehicle Registration Number\n9. Loaded By (person's name)\n\nReturn ONLY a JSON object with this exact structure:\n{\n  \"invoice_number\": \"string\",\n  \"total_weight_kg\": number,\n  \"container_numbers\": [\"code1\", \"code2\", \"code3\"],\n  \"driver_name\": \"string\",\n  \"driver_contact\": \"string\",\n  \"date_loaded\": \"YYYY-MM-DD\",\n  \"time_loaded\": \"HH:MM\",\n  \"transporter\": \"string\",\n  \"vehicle_registration\": \"string\",\n  \"loaded_by\": \"string\"\n}\n\nIf a field is not found or unclear, use null. Be careful with handwriting - common mistakes:\n- '0' vs 'O'\n- '1' vs 'I' vs 'l'\n- '5' vs 'S'\n- '8' vs 'B'\n\nExtract from this document.",
+        "inputType": "binary",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        320
+      ],
+      "id": "72c8cc94-45b8-4afd-b100-bde6e8350b91",
+      "name": "Analyze document",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ULSBBIsutuJzDrrD",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - Load Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Prepare PDF Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PDF Data": {
+      "main": [
+        [
+          {
+            "node": "Analyze document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Gemini Response": {
+      "main": [
+        [
+          {
+            "node": "Send to Laravel Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Laravel Backend": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze document": {
+      "main": [
+        [
+          {
+            "node": "Parse Gemini Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "9b023c0b-8ba7-4e9c-8a2a-53a1492a7eba",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6a94b6ca2cd5f4dba9c87da2e522ce558d6b80fba7a02455e7fc93b52893bcbd"
+  },
+  "id": "GmM2SqizAozS3jBl",
+  "tags": []
+}

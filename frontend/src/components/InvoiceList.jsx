@@ -22,6 +22,11 @@ import {
   DialogContent,
   DialogActions,
   Button,
+  TextField,
+  Select,
+  InputLabel,
+  FormControl,
+  InputAdornment,
 } from '@mui/material';
 import {
   MoreVert as MoreVertIcon,
@@ -29,7 +34,12 @@ import {
   Error as ErrorIcon,
   LocalShipping as ShippingIcon,
   Visibility as VisibilityIcon,
+  Search as SearchIcon,
+  FilterList as FilterListIcon,
+  ArrowUpward as ArrowUpwardIcon,
+  ArrowDownward as ArrowDownwardIcon,
 } from '@mui/icons-material';
+import { useSnackbar } from 'notistack';
 import { invoiceService } from '../services/invoiceService';
 import InvoiceTabbedView from './InvoiceTabbedView';
 import TransportRequestDialog from './TransportRequestDialog';
@@ -61,6 +71,7 @@ const ownerLabels = {
 };
 
 export default function InvoiceList() {
+  const { enqueueSnackbar } = useSnackbar();
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -71,13 +82,22 @@ export default function InvoiceList() {
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [detailInvoice, setDetailInvoice] = useState(null);
   const [transportRequestDialogOpen, setTransportRequestDialogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [stageFilter, setStageFilter] = useState('all');
+  const [orderBy, setOrderBy] = useState('id');
+  const [order, setOrder] = useState('desc');
 
   const loadInvoices = async () => {
     try {
       setLoading(true);
       setError(null);
       const data = await invoiceService.getAll();
-      setInvoices(data.data || []);
+      // Filter to only show commercial invoices (not purchase orders)
+      const commercialInvoices = (data.data || []).filter(
+        invoice => invoice.invoice_type === 'commercial_invoice'
+      );
+      setInvoices(commercialInvoices);
     } catch (err) {
       setError('Failed to load invoices: ' + err.message);
     } finally {
@@ -88,6 +108,92 @@ export default function InvoiceList() {
   useEffect(() => {
     loadInvoices();
   }, []);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setPage(0);
+  }, [searchTerm, statusFilter, stageFilter]);
+
+  // Sorting function
+  const handleRequestSort = (property) => {
+    const isAsc = orderBy === property && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy(property);
+  };
+
+  const getComparatorValue = (invoice, property) => {
+    switch (property) {
+      case 'invoice_number':
+        return invoice.invoice_number || '';
+      case 'invoice_date':
+        return invoice.invoice_date || '';
+      case 'supplier':
+        return invoice.supplier?.name || '';
+      case 'customer':
+        return invoice.customer?.name || '';
+      case 'total_amount':
+        return parseFloat(invoice.total_amount) || 0;
+      case 'current_stage':
+        return invoice.current_stage || '';
+      case 'current_owner':
+        return invoice.current_owner || '';
+      case 'status':
+        return invoice.status || '';
+      default:
+        return invoice[property] || '';
+    }
+  };
+
+  // Filter and sort invoices based on search term, status, and stage
+  const getFilteredInvoices = () => {
+    let filtered = [...invoices];
+
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const search = searchTerm.toLowerCase();
+      filtered = filtered.filter(invoice => {
+        const invoiceNumber = (invoice.invoice_number || '').toLowerCase();
+        const supplierName = (invoice.supplier?.name || '').toLowerCase();
+        const customerName = (invoice.customer?.name || '').toLowerCase();
+        const supplierCode = (invoice.supplier?.code || '').toLowerCase();
+        const customerCode = (invoice.customer?.code || '').toLowerCase();
+
+        return invoiceNumber.includes(search) ||
+               supplierName.includes(search) ||
+               customerName.includes(search) ||
+               supplierCode.includes(search) ||
+               customerCode.includes(search);
+      });
+    }
+
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(invoice => invoice.status === statusFilter);
+    }
+
+    // Apply stage filter
+    if (stageFilter !== 'all') {
+      filtered = filtered.filter(invoice => invoice.current_stage === stageFilter);
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      const aValue = getComparatorValue(a, orderBy);
+      const bValue = getComparatorValue(b, orderBy);
+
+      if (aValue < bValue) {
+        return order === 'asc' ? -1 : 1;
+      }
+      if (aValue > bValue) {
+        return order === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+
+    return filtered;
+  };
+
+  const filteredInvoices = getFilteredInvoices();
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
@@ -123,7 +229,9 @@ export default function InvoiceList() {
 
     try {
       const result = await invoiceService.checkDocuments(selectedInvoice.id);
-      alert(`Documents check: ${result.can_proceed ? 'Complete ✓' : 'Incomplete ✗'}\n${result.message}`);
+      enqueueSnackbar(`Documents check: ${result.can_proceed ? 'Complete ✓' : 'Incomplete ✗'} - ${result.message}`, {
+        variant: result.can_proceed ? 'success' : 'warning'
+      });
       handleMenuClose();
       loadInvoices(); // Reload list
     } catch (err) {
@@ -147,16 +255,16 @@ export default function InvoiceList() {
   const handleSaveInvoice = async (updatedInvoice) => {
     try {
       await invoiceService.update(updatedInvoice.id, updatedInvoice);
-      alert('Invoice updated successfully!');
+      enqueueSnackbar('Invoice updated successfully!', { variant: 'success' });
 
       // Refresh the invoice details
       const refreshedData = await invoiceService.getById(updatedInvoice.id);
       setDetailInvoice(refreshedData);
 
-      // Reload the list
+      // Refresh the main invoice list to show updated status
       loadInvoices();
     } catch (err) {
-      alert('Failed to save invoice: ' + err.message);
+      enqueueSnackbar('Failed to save invoice: ' + err.message, { variant: 'error' });
       throw err; // Re-throw so the detail view knows save failed
     }
   };
@@ -185,24 +293,165 @@ export default function InvoiceList() {
 
   return (
     <Box>
+      {/* Compact Filter Section */}
+      <Paper sx={{ p: 2, mb: 2, bgcolor: '#f8f9fa' }}>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+          <TextField
+            size="small"
+            placeholder="Search by invoice number, supplier, customer..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            }}
+            sx={{ minWidth: 300, bgcolor: 'white' }}
+          />
+          <FormControl size="small" sx={{ minWidth: 150, bgcolor: 'white' }}>
+            <InputLabel>Status</InputLabel>
+            <Select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              label="Status"
+              startAdornment={
+                <InputAdornment position="start">
+                  <FilterListIcon fontSize="small" />
+                </InputAdornment>
+              }
+            >
+              <MenuItem value="all">All Statuses</MenuItem>
+              <MenuItem value="draft">Draft</MenuItem>
+              <MenuItem value="pending_transport">Pending Transport</MenuItem>
+              <MenuItem value="transport_requested">Transport Requested</MenuItem>
+              <MenuItem value="in_transit">In Transit</MenuItem>
+              <MenuItem value="delivered">Delivered</MenuItem>
+              <MenuItem value="cancelled">Cancelled</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 180, bgcolor: 'white' }}>
+            <InputLabel>Stage</InputLabel>
+            <Select
+              value={stageFilter}
+              onChange={(e) => setStageFilter(e.target.value)}
+              label="Stage"
+            >
+              <MenuItem value="all">All Stages</MenuItem>
+              <MenuItem value="invoice_received">Invoice Received</MenuItem>
+              <MenuItem value="awaiting_documents">Awaiting Documents</MenuItem>
+              <MenuItem value="documents_complete">Documents Complete</MenuItem>
+              <MenuItem value="transport_requested">Transport Requested</MenuItem>
+              <MenuItem value="load_confirmed">Load Confirmed</MenuItem>
+              <MenuItem value="in_transit">In Transit</MenuItem>
+              <MenuItem value="delivered">Delivered</MenuItem>
+            </Select>
+          </FormControl>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
+            Showing {filteredInvoices.length} of {invoices.length} invoices
+          </Typography>
+        </Box>
+      </Paper>
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
             <TableRow sx={{ bgcolor: '#001f3f' }}>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Invoice Number</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Date</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Supplier</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Customer</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Amount</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Stage</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Owner</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Status</TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('invoice_number')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Invoice Number
+                  {orderBy === 'invoice_number' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('invoice_date')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Date
+                  {orderBy === 'invoice_date' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('supplier')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Supplier
+                  {orderBy === 'supplier' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('customer')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Customer
+                  {orderBy === 'customer' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('total_amount')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Amount
+                  {orderBy === 'total_amount' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('current_stage')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Stage
+                  {orderBy === 'current_stage' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('current_owner')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Owner
+                  {orderBy === 'current_owner' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
+              <TableCell
+                sx={{ color: 'white', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => handleRequestSort('status')}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Status
+                  {orderBy === 'status' && (
+                    order === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />
+                  )}
+                </Box>
+              </TableCell>
               <TableCell sx={{ color: 'white', fontWeight: 600 }}>Documents</TableCell>
               <TableCell align="right" sx={{ color: 'white', fontWeight: 600 }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {invoices
+            {filteredInvoices
               .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
               .map((invoice) => (
                 <TableRow
@@ -311,7 +560,7 @@ export default function InvoiceList() {
       <TablePagination
         rowsPerPageOptions={[5, 10, 25, 50]}
         component="div"
-        count={invoices.length}
+        count={filteredInvoices.length}
         rowsPerPage={rowsPerPage}
         page={page}
         onPageChange={handleChangePage}

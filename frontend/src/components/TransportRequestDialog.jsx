@@ -15,11 +15,13 @@ import {
   Paper,
   Box,
 } from '@mui/material';
+import { useSnackbar } from 'notistack';
 import { transportRequestService } from '../services/transportRequestService';
 import { vehicleTypes, equipmentLabels, getEquipmentForVehicleType } from '../config/vehicleTypes';
 
 // Updated: All fields now stack vertically (xs={12})
 export default function TransportRequestDialog({ open, onClose, invoice, onSuccess }) {
+  const { enqueueSnackbar } = useSnackbar();
   const [formData, setFormData] = useState({
     file_ref: '',
     vehicle_type: '',
@@ -96,7 +98,10 @@ export default function TransportRequestDialog({ open, onClose, invoice, onSucce
       }
 
       const result = await transportRequestService.create(data);
-      alert(`Transport request created successfully!\nReference: ${result.transport_request.request_reference}`);
+      enqueueSnackbar(`Transport request created successfully! Reference: ${result.transport_request.request_reference}`, {
+        variant: 'success',
+        autoHideDuration: 5000
+      });
       onSuccess();
       onClose();
 

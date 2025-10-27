@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -23,6 +23,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  CircularProgress,
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -32,17 +33,29 @@ import {
   Save as SaveIcon,
   Cancel as CancelIcon,
   CallSplit as CallSplitIcon,
+  AutoFixHigh as AutoFixHighIcon,
+  Upload as UploadIcon,
+  LocalShipping as LocalShippingIcon,
 } from '@mui/icons-material';
 import { agentService } from '../services/agentService';
 import { invoiceService } from '../services/invoiceService';
 import SplitPackageDialog from './SplitPackageDialog';
+import ManualPackingListForm from './ManualPackingListForm';
+import { useSnackbar } from 'notistack';
+import axios from 'axios';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
 const InvoiceDetailView = ({ invoice, mode = 'readonly', onSave }) => {
+  const { enqueueSnackbar } = useSnackbar();
+  const fileInputRef = useRef(null);
   const [currentTab, setCurrentTab] = useState(0);
   const [showRaw, setShowRaw] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editedInvoice, setEditedInvoice] = useState(invoice);
   const [agents, setAgents] = useState([]);
+  const [packingListAutoGenCompleted, setPackingListAutoGenCompleted] = useState(false);
+  const [uploadingLC, setUploadingLC] = useState(false);
 
   // Helper function to get current user profile
   const getCurrentProfile = () => {
@@ -88,6 +101,65 @@ const InvoiceDetailView = ({ invoice, mode = 'readonly', onSave }) => {
   const handleCancel = () => {
     setEditedInvoice(invoice);
     setIsEditing(false);
+  };
+
+  const handleUploadLoadConfirmation = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (file.type !== 'application/pdf') {
+      enqueueSnackbar('Please upload a PDF file', { variant: 'error' });
+      return;
+    }
+
+    try {
+      setUploadingLC(true);
+      enqueueSnackbar('Uploading and extracting load confirmation data...', { variant: 'info' });
+
+      // Convert file to base64
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64String = reader.result.split(',')[1];
+          resolve(base64String);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      // Upload to backend
+      const response = await axios.post(`${API_BASE_URL}/upload/load-confirmation`, {
+        pdf_base64: base64,
+        invoice_id: invoice.id,
+      });
+
+      if (response.data.success) {
+        enqueueSnackbar('Load confirmation extracted successfully!', { variant: 'success' });
+        // Refresh the invoice data if needed
+        if (onSave) {
+          // Optionally refresh the invoice
+        }
+      } else {
+        enqueueSnackbar('Failed to extract load confirmation', { variant: 'error' });
+      }
+    } catch (error) {
+      console.error('Load confirmation upload error:', error);
+      enqueueSnackbar(
+        error.response?.data?.error || 'Failed to upload load confirmation',
+        { variant: 'error' }
+      );
+    } finally {
+      setUploadingLC(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   const isEditable = isEditing;
@@ -322,7 +394,7 @@ const InvoiceDetailView = ({ invoice, mode = 'readonly', onSave }) => {
                       fullWidth
                       size="small"
                       value={
-                        typeof editedInvoice.supplier_contact === 'object'
+                        editedInvoice.supplier_contact && typeof editedInvoice.supplier_contact === 'object'
                           ? Object.values(editedInvoice.supplier_contact).filter(Boolean).join(', ')
                           : (editedInvoice.supplier_contact || '')
                       }
@@ -423,9 +495,24 @@ const InvoiceDetailView = ({ invoice, mode = 'readonly', onSave }) => {
 
             {/* Entry Agent */}
             <Box sx={{ flex: 1 }}>
-              <Typography variant="caption" sx={{ color: '#666', fontWeight: 500, textTransform: 'uppercase', fontSize: '0.7rem', display: 'block', mb: 1 }}>
-                Entry Agent
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <Typography variant="caption" sx={{ color: '#666', fontWeight: 500, textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                  Entry Agent
+                </Typography>
+                {invoice.parent_invoice_id && invoice.parent?.entry_agent && invoice.entry_agent === invoice.parent.entry_agent && (
+                  <Chip
+                    label="Inherited from PO"
+                    size="small"
+                    sx={{
+                      height: 18,
+                      fontSize: '0.65rem',
+                      bgcolor: '#e3f2fd',
+                      color: '#1976d2',
+                      '& .MuiChip-label': { px: 1 }
+                    }}
+                  />
+                )}
+              </Box>
               {isEditable ? (
                 <Autocomplete
                   multiple
@@ -461,6 +548,53 @@ const InvoiceDetailView = ({ invoice, mode = 'readonly', onSave }) => {
                   {invoice.entry_agent || '-'}
                 </Typography>
               )}
+            </Box>
+          </Box>
+        </Box>
+
+        {/* Packing Totals Panel */}
+        <Box sx={{ p: 2, bgcolor: '#e6f9f5', borderRadius: 1, border: '1px solid #73e9c7', mt: 3 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#001f3f', mb: 2 }}>
+            Packing Totals
+          </Typography>
+
+          <Box sx={{ display: 'flex', gap: 3 }}>
+            {/* Total Qty */}
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" sx={{ color: '#666', fontWeight: 500, textTransform: 'uppercase', fontSize: '0.7rem', display: 'block', mb: 1 }}>
+                Total Qty
+              </Typography>
+              <Typography variant="body1" sx={{ fontSize: '1.1rem', fontWeight: 600, color: '#001f3f', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid #73e9c7' }}>
+                {(editedInvoice.packing_details || []).reduce((sum, detail) => sum + (parseFloat(detail.quantity) || 0), 0).toFixed(0)}
+              </Typography>
+            </Box>
+
+            {/* Total CBM */}
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" sx={{ color: '#666', fontWeight: 500, textTransform: 'uppercase', fontSize: '0.7rem', display: 'block', mb: 1 }}>
+                Total CBM
+              </Typography>
+              <Typography variant="body1" sx={{ fontSize: '1.1rem', fontWeight: 600, color: '#001f3f', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid #73e9c7' }}>
+                {(editedInvoice.packing_details || []).reduce((sum, detail) => {
+                  const qty = parseFloat(detail.quantity) || 0;
+                  const cbm = parseFloat(detail.cbm) || 0;
+                  return sum + (qty * cbm);
+                }, 0).toFixed(3)}
+              </Typography>
+            </Box>
+
+            {/* Total Gross Weight */}
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" sx={{ color: '#666', fontWeight: 500, textTransform: 'uppercase', fontSize: '0.7rem', display: 'block', mb: 1 }}>
+                Total Gross (kg)
+              </Typography>
+              <Typography variant="body1" sx={{ fontSize: '1.1rem', fontWeight: 600, color: '#001f3f', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid #73e9c7' }}>
+                {(editedInvoice.packing_details || []).reduce((sum, detail) => {
+                  const qty = parseFloat(detail.quantity) || 0;
+                  const gross = parseFloat(detail.gross_weight_kg) || 0;
+                  return sum + (qty * gross);
+                }, 0).toFixed(2)}
+              </Typography>
             </Box>
           </Box>
         </Box>
@@ -521,7 +655,10 @@ const InvoiceDetailView = ({ invoice, mode = 'readonly', onSave }) => {
               details={editedInvoice.packing_details || []}
               isEditable={isEditable}
               onChange={(details) => setEditedInvoice({ ...editedInvoice, packing_details: details })}
+              invoice={editedInvoice}
               canSplitPackages={canSplitPackages()}
+              autoGenCompleted={packingListAutoGenCompleted}
+              setAutoGenCompleted={setPackingListAutoGenCompleted}
             />
           )}
           {currentTab === 2 && (
@@ -737,16 +874,95 @@ const LineItemsTab = ({ items, isEditable, onChange }) => {
 };
 
 // Packing Details Tab Component
-const PackingDetailsTab = ({ details, isEditable, onChange, canSplitPackages }) => {
+const PackingDetailsTab = ({ details, isEditable, onChange, canSplitPackages, invoice, autoGenCompleted, setAutoGenCompleted }) => {
   const [fileNameErrors, setFileNameErrors] = useState({});
   const [fileNameStatus, setFileNameStatus] = useState({}); // Store validation status
   const [validationTimers, setValidationTimers] = useState({});
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const [selectedPackageIndex, setSelectedPackageIndex] = useState(null);
+  const [packingListDialogOpen, setPackingListDialogOpen] = useState(false);
+  const [autoGenerating, setAutoGenerating] = useState(false);
+
+  // Ref-based lock to prevent race condition from React StrictMode double-execution
+  const generationInProgress = useRef(false);
+
+  // Auto-generation logic - Runs when packing details tab is viewed
+  useEffect(() => {
+    const checkAndAutoGenerate = async () => {
+      // Check if generation is already in progress (prevents race condition)
+      if (generationInProgress.current) {
+        console.log('⏭️ Skipping: Generation already in progress');
+        return;
+      }
+
+      // Only run if no packing details and not already complete
+      if ((!details || details.length === 0) && !autoGenCompleted && invoice?.id) {
+        try {
+          // Acquire lock
+          generationInProgress.current = true;
+          setAutoGenerating(true);
+          console.log(`Checking if auto-generation is possible for invoice ${invoice.id}...`);
+
+          // Step 1: Check if auto-generation is possible
+          const checkResponse = await fetch(`http://127.0.0.1:8000/api/invoices/${invoice.id}/check-packaging-rules`);
+          const checkData = await checkResponse.json();
+
+          console.log('Check result:', checkData);
+
+          // Step 2: If auto-generation is possible, generate
+          if (checkData.action === 'auto_generate') {
+            console.log('✅ Auto-generating packing list...');
+
+            const genResponse = await fetch(`http://127.0.0.1:8000/api/invoices/${invoice.id}/generate-packing-list`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ invoice_id: invoice.id })
+            });
+
+            const genData = await genResponse.json();
+
+            if (genData.success) {
+              console.log(`✅ Packing list auto-generated: ${genData.packages_created} packages`);
+
+              // Step 3: Fetch the generated packing list
+              const packingResponse = await fetch(`http://127.0.0.1:8000/api/invoices/${invoice.id}/packing-list`);
+              const packingData = await packingResponse.json();
+
+              if (packingData.packing_list?.packages) {
+                onChange(packingData.packing_list.packages);
+              }
+            }
+          } else if (checkData.action === 'display_existing') {
+            console.log('📦 Fetching existing packing list...');
+            // Fetch existing packing list
+            const packingResponse = await fetch(`http://127.0.0.1:8000/api/invoices/${invoice.id}/packing-list`);
+            const packingData = await packingResponse.json();
+
+            if (packingData.packing_list?.packages) {
+              onChange(packingData.packing_list.packages);
+            }
+          } else {
+            console.log('⚠️ No packaging rules found - manual entry required');
+          }
+
+          setAutoGenCompleted(true);
+        } catch (error) {
+          console.error('❌ Auto-generation failed:', error);
+        } finally {
+          // Release lock
+          generationInProgress.current = false;
+          setAutoGenerating(false);
+        }
+      }
+    };
+
+    checkAndAutoGenerate();
+  }, [invoice?.id, details, autoGenCompleted, onChange, setAutoGenCompleted]);
 
   const handleAddDetail = () => {
     const newDetail = {
       package_number: details.length + 1,
+      quantity: 1,
       package_type: '',
       length_cm: 0,
       width_cm: 0,
@@ -892,6 +1108,7 @@ const PackingDetailsTab = ({ details, isEditable, onChange, canSplitPackages }) 
     // Create new split package
     const newPackage = {
       package_number: details.length + 1,
+      quantity: 1,
       package_type: originalPackage.package_type,
       gross_weight_kg: parseFloat(splitData.gross_weight_kg),
       net_weight_kg: parseFloat(splitData.net_weight_kg),
@@ -929,30 +1146,76 @@ const PackingDetailsTab = ({ details, isEditable, onChange, canSplitPackages }) 
     setSplitDialogOpen(true);
   };
 
+  // Show loading indicator during auto-generation
+  if (autoGenerating) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 6, bgcolor: '#fafafa', borderRadius: 1 }}>
+        <CircularProgress size={48} sx={{ color: '#73e9c7', mb: 2 }} />
+        <Typography variant="h6" color="textSecondary" gutterBottom>
+          <AutoFixHighIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+          Auto-generating packing list...
+        </Typography>
+        <Typography variant="body2" color="textSecondary">
+          Checking packaging rules for this supplier...
+        </Typography>
+      </Box>
+    );
+  }
+
   if (!details || details.length === 0) {
     return (
       <Box sx={{ textAlign: 'center', py: 6, bgcolor: '#fafafa', borderRadius: 1 }}>
         <Typography variant="h6" color="textSecondary" gutterBottom>
           No packing details
         </Typography>
-        {isEditable && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 2 }}>
           <Button
             startIcon={<AddIcon />}
-            onClick={handleAddDetail}
-            variant="contained"
-            sx={{ mt: 2, bgcolor: '#73e9c7', color: '#001f3f', '&:hover': { bgcolor: '#5fd4b3' } }}
+            onClick={() => setPackingListDialogOpen(true)}
+            variant="outlined"
+            sx={{ color: '#001f3f', borderColor: '#001f3f', '&:hover': { borderColor: '#73e9c7', bgcolor: '#f0fffe' } }}
           >
-            Add Package
+            Create Packing List
           </Button>
-        )}
+          {isEditable && (
+            <Button
+              startIcon={<AddIcon />}
+              onClick={handleAddDetail}
+              variant="contained"
+              sx={{ bgcolor: '#73e9c7', color: '#001f3f', '&:hover': { bgcolor: '#5fd4b3' } }}
+            >
+              Add Package
+            </Button>
+          )}
+        </Box>
+
+        {/* Manual Packing List Dialog */}
+        <ManualPackingListForm
+          open={packingListDialogOpen}
+          onClose={() => setPackingListDialogOpen(false)}
+          invoice={invoice}
+          onSaved={(data) => {
+            // Refresh invoice data by updating packing details
+            onChange(data.packing_details || []);
+            setPackingListDialogOpen(false);
+          }}
+        />
       </Box>
     );
   }
 
   return (
     <Box>
-      {isEditable && (
-        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+        <Button
+          startIcon={<AddIcon />}
+          onClick={() => setPackingListDialogOpen(true)}
+          variant="outlined"
+          sx={{ color: '#001f3f', borderColor: '#001f3f', '&:hover': { borderColor: '#73e9c7', bgcolor: '#f0fffe' } }}
+        >
+          Create Packing List
+        </Button>
+        {isEditable && (
           <Button
             startIcon={<AddIcon />}
             onClick={handleAddDetail}
@@ -961,13 +1224,14 @@ const PackingDetailsTab = ({ details, isEditable, onChange, canSplitPackages }) 
           >
             Add Package
           </Button>
-        </Box>
-      )}
+        )}
+      </Box>
       <TableContainer sx={{ border: '1px solid #e0e0e0', borderRadius: 1 }}>
         <Table size="small">
           <TableHead>
             <TableRow sx={{ bgcolor: '#001f3f' }}>
               <TableCell sx={{ color: 'white', fontWeight: 600 }}>Pkg #</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 600 }}>Qty</TableCell>
               <TableCell sx={{ color: 'white', fontWeight: 600 }}>Type</TableCell>
               <TableCell sx={{ color: 'white', fontWeight: 600 }}>L (cm)</TableCell>
               <TableCell sx={{ color: 'white', fontWeight: 600 }}>W (cm)</TableCell>
@@ -994,6 +1258,19 @@ const PackingDetailsTab = ({ details, isEditable, onChange, canSplitPackages }) 
                 }}
               >
                 <TableCell sx={{ fontWeight: 500 }}>{detail.package_number}</TableCell>
+                <TableCell>
+                  {isEditable ? (
+                    <TextField
+                      type="number"
+                      value={detail.quantity || 1}
+                      onChange={(e) => handleUpdateDetail(index, 'quantity', e.target.value)}
+                      size="small"
+                      sx={{ width: 60 }}
+                    />
+                  ) : (
+                    detail.quantity || 1
+                  )}
+                </TableCell>
                 <TableCell>
                   {isEditable ? (
                     <TextField
@@ -1144,6 +1421,18 @@ const PackingDetailsTab = ({ details, isEditable, onChange, canSplitPackages }) 
         }}
         originalPackage={selectedPackageIndex !== null ? details[selectedPackageIndex] : null}
         onSplit={handleSplitPackage}
+      />
+
+      {/* Manual Packing List Dialog */}
+      <ManualPackingListForm
+        open={packingListDialogOpen}
+        onClose={() => setPackingListDialogOpen(false)}
+        invoice={invoice}
+        onSaved={(data) => {
+          // Refresh invoice data by updating packing details
+          onChange(data.packing_details || []);
+          setPackingListDialogOpen(false);
+        }}
       />
     </Box>
   );

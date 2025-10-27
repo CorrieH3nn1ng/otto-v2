@@ -148,9 +148,14 @@ export default function ManifestList() {
 
   const handlePrintPDF = async () => {
     if (!selectedManifest) return;
-    // TODO: Implement PDF download
-    console.log('Print PDF for manifest:', selectedManifest);
-    handleMenuClose();
+
+    try {
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+      window.open(`${apiUrl}/manifests/${selectedManifest.id}/download-pdf`, '_blank');
+      handleMenuClose();
+    } catch (err) {
+      alert('Failed to download PDF: ' + (err.response?.data?.message || err.message));
+    }
   };
 
   const handleSubmitFERI = async () => {

@@ -8,6 +8,23 @@ use App\Http\Controllers\Api\LoadConfirmationController;
 use App\Http\Controllers\Api\ManifestController;
 use App\Http\Controllers\Api\TransportRequestController;
 use App\Http\Controllers\Api\WebhookController;
+use App\Http\Controllers\Api\LicenseController;
+
+// Purchase Order routes
+Route::prefix('purchase-orders')->group(function () {
+    Route::get('/', [InvoiceController::class, 'getPurchaseOrders']);
+    Route::post('/', [InvoiceController::class, 'createPurchaseOrder']);
+    Route::post('/upload', [InvoiceController::class, 'uploadPurchaseOrder']);
+    Route::get('/{id}', [InvoiceController::class, 'getPurchaseOrder']);
+    Route::get('/{id}/licenses', [LicenseController::class, 'getByPurchaseOrder']);
+});
+
+// License routes
+Route::prefix('licenses')->group(function () {
+    Route::post('/upload', [LicenseController::class, 'upload']);
+    Route::get('/{id}', [LicenseController::class, 'show']);
+    Route::delete('/{id}', [LicenseController::class, 'destroy']);
+});
 
 // Invoice routes
 Route::prefix('invoices')->group(function () {
@@ -30,6 +47,13 @@ Route::prefix('invoices')->group(function () {
     Route::post('/{id}/update-bv-status', [InvoiceController::class, 'updateBvStatus']);
     Route::post('/{id}/mark-ready-for-transport', [InvoiceController::class, 'markReadyForTransport']);
     Route::get('/{id}/activities', [InvoiceController::class, 'getActivities']);
+    // Manual Packing List routes (for when supplier doesn't provide packing list)
+    Route::post('/{id}/packing-list', [InvoiceController::class, 'storePackingList']);
+    Route::get('/{id}/packing-list', [InvoiceController::class, 'getPackingList']);
+    Route::get('/{id}/packing-list/pdf', [InvoiceController::class, 'generatePackingListPDF']);
+    // Auto-generation packing list routes
+    Route::get('/{id}/check-packaging-rules', [InvoiceController::class, 'checkPackagingRules']);
+    Route::post('/{id}/generate-packing-list', [InvoiceController::class, 'generatePackingList']);
 });
 
 // Document routes
@@ -76,6 +100,7 @@ Route::prefix('manifests')->group(function () {
     Route::get('/', [ManifestController::class, 'index']);
     Route::post('/', [ManifestController::class, 'store']);
     Route::get('/{id}', [ManifestController::class, 'show']);
+    Route::get('/{id}/download-pdf', [ManifestController::class, 'downloadPdf']);
     Route::put('/{id}', [ManifestController::class, 'update']);
     Route::delete('/{id}', [ManifestController::class, 'destroy']);
     Route::post('/{id}/submit-feri', [ManifestController::class, 'submitFeri']);
@@ -90,6 +115,7 @@ Route::prefix('webhook')->group(function () {
     Route::post('/invoice', [WebhookController::class, 'receiveInvoiceData']);
     Route::post('/document', [WebhookController::class, 'receiveDocumentData']);
     Route::post('/pending-document', [WebhookController::class, 'receivePendingDocument']);
+    Route::post('/load-confirmation', [WebhookController::class, 'receiveLoadConfirmationExtraction']);
 });
 
 // Pending documents (awaiting acknowledgment)
@@ -100,8 +126,10 @@ Route::prefix('pending-documents')->group(function () {
     Route::post('/{id}/reject', [WebhookController::class, 'rejectPendingDocument']);
 });
 
-// Upload route (proxies to n8n)
-Route::post('/upload/invoice', [WebhookController::class, 'uploadInvoicePdf']);
+// Upload routes
+Route::post('/upload/invoice', [InvoiceController::class, 'uploadCommercialInvoice']);
+Route::post('/upload/invoice-old', [WebhookController::class, 'uploadInvoicePdf']); // Legacy endpoint
+Route::post('/upload/load-confirmation', [WebhookController::class, 'uploadLoadConfirmationPdf']);
 
 
 // Transporter routes

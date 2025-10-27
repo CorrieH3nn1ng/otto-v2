@@ -14,6 +14,7 @@ import {
   TableRow,
   Alert,
   CircularProgress,
+  Button,
 } from '@mui/material';
 import {
   Assignment as ManifestIcon,
@@ -21,6 +22,7 @@ import {
   Business as BusinessIcon,
   LocationOn as LocationIcon,
   Description as InvoiceIcon,
+  PictureAsPdf as PdfIcon,
 } from '@mui/icons-material';
 
 export default function ManifestDetailView({ manifest: initialManifest, manifestId }) {
@@ -99,6 +101,12 @@ export default function ManifestDetailView({ manifest: initialManifest, manifest
   const invoiceNumbers = invoices.map(inv => inv.invoice_number).filter(Boolean).join(' / ');
   const poNumbers = invoices.map(inv => inv.purchase_order_number).filter(Boolean).join(' / ');
 
+  // Handle PDF download
+  const handleDownloadPdf = () => {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+    window.open(`${apiUrl}/manifests/${manifest.id}/download-pdf`, '_blank');
+  };
+
   return (
     <Box sx={{ p: 2 }}>
       {/* Header Section */}
@@ -112,16 +120,33 @@ export default function ManifestDetailView({ manifest: initialManifest, manifest
           borderRadius: 2,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-          <ManifestIcon sx={{ fontSize: 40 }} />
-          <Box>
-            <Typography variant="h5" sx={{ fontWeight: 700 }}>
-              {manifest.manifest_number}
-            </Typography>
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
-              Road Freight Manifest
-            </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <ManifestIcon sx={{ fontSize: 40 }} />
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                {manifest.manifest_number}
+              </Typography>
+              <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                Road Freight Manifest
+              </Typography>
+            </Box>
           </Box>
+          <Button
+            variant="contained"
+            startIcon={<PdfIcon />}
+            onClick={handleDownloadPdf}
+            sx={{
+              bgcolor: '#73e9c7',
+              color: '#001f3f',
+              fontWeight: 600,
+              '&:hover': {
+                bgcolor: '#5dd4b0',
+              },
+            }}
+          >
+            Download PDF
+          </Button>
         </Box>
         <Grid container spacing={2}>
           <Grid item xs={6} md={3}>

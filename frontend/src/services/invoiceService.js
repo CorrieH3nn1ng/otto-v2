@@ -45,7 +45,8 @@ export const invoiceService = {
 
   // Get dashboard statistics
   getStatistics: async () => {
-    const response = await api.get('/invoices/statistics');
+    // Add timestamp to prevent caching
+    const response = await api.get(`/invoices/statistics?_t=${Date.now()}`);
     return response.data;
   },
 

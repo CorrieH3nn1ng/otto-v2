@@ -11,10 +11,12 @@ use App\Models\PendingDocument;
 use App\Models\InvoiceLineItem;
 use App\Models\DeliveryNoteItem;
 use App\Models\PackingDetail;
+use App\Models\LoadConfirmation;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 
 class WebhookController extends Controller
 {
@@ -142,6 +144,11 @@ class WebhookController extends Controller
 
                 // Update workflow status
                 $invoice->updateWorkflowStatus();
+            }
+
+            // Auto-calculate expected_weight_kg from line items if not already set
+            if (!$invoice->expected_weight_kg && $invoice->lineItems()->count() > 0) {
+                $invoice->updateExpectedWeightFromLineItems();
             }
 
             Log::info('Invoice created successfully from webhook', [
@@ -412,6 +419,655 @@ class WebhookController extends Controller
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to process pending document',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Upload load confirmation PDF - proxy to n8n workflow for Gemini extraction
+     * Then process the extracted data locally
+     */
+    public function uploadLoadConfirmationPdf(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'pdf_base64' => 'required|string',
+            ]);
+
+            // Forward to n8n workflow for Gemini extraction (just extraction, no Laravel callback)
+            // n8n will extract both invoice number and transport details from the PDF
+            $n8nUrl = 'http://localhost:5678/webhook/otto-load-confirmation-extract';
+
+            Log::info('Sending PDF to n8n for extraction');
+
+            $response = \Http::timeout(300)->post($n8nUrl, [
+                'pdf_base64' => $validated['pdf_base64'],
+            ]);
+
+            if (!$response->successful()) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'n8n workflow failed',
+                    'message' => $response->body()
+                ], $response->status());
+            }
+
+            // Get extracted data from n8n
+            $extractedResponse = $response->json();
+
+            Log::info('Received extraction from n8n', ['response' => $extractedResponse]);
+
+            // n8n returns data in different formats depending on the response node
+            // It might be wrapped in an array or have the data directly
+            $responseData = $extractedResponse;
+
+            // If response is an array, get the first item
+            if (is_array($extractedResponse) && isset($extractedResponse[0])) {
+                $responseData = $extractedResponse[0];
+            }
+
+            // Check if we have the expected fields
+            if (!isset($responseData['invoice_number']) || !isset($responseData['extracted_data'])) {
+                Log::error('Invalid response structure from n8n', ['response' => $extractedResponse]);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Invalid response from extraction service',
+                    'details' => 'Missing invoice_number or extracted_data fields'
+                ], 500);
+            }
+
+            // Process the extracted data locally (fast!)
+            $invoiceNumber = $responseData['invoice_number'];
+            $extractedData = $responseData['extracted_data'];
+
+            // Find invoice by invoice number
+            $invoice = Invoice::where('invoice_number', $invoiceNumber)->first();
+
+            if (!$invoice) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Invoice not found',
+                    'message' => "No invoice found with number: {$invoiceNumber}"
+                ], 404);
+            }
+
+            // Update invoice with actual weight if provided
+            if (!empty($extractedData['total_weight_kg'])) {
+                $invoice->actual_weight_kg = $extractedData['total_weight_kg'];
+                $invoice->save();
+            }
+
+            // Lookup vehicle details from vehicles table
+            $vehicle = null;
+            $vehicleType = null;
+            $transporterFromVehicle = null;
+
+            // Try to find vehicle from container_numbers array (more reliable than single vehicle_registration field)
+            $containerNumbers = $extractedData['container_numbers'] ?? [];
+            $vehicle = null;
+
+            foreach ($containerNumbers as $registration) {
+                $vehicle = \App\Models\Vehicle::findByRegistration($registration);
+                if ($vehicle) {
+                    $vehicleType = $vehicle->truck_type;
+                    $transporterFromVehicle = $vehicle->transporter;
+
+                    Log::info('Vehicle found in database from container numbers', [
+                        'searched_registration' => $registration,
+                        'vehicle_type' => $vehicleType,
+                        'transporter' => $transporterFromVehicle
+                    ]);
+                    break; // Found a match, stop searching
+                }
+            }
+
+            // Fallback: If not found in container_numbers, try vehicle_registration field
+            if (!$vehicle && !empty($extractedData['vehicle_registration'])) {
+                $vehicle = \App\Models\Vehicle::findByRegistration($extractedData['vehicle_registration']);
+
+                if ($vehicle) {
+                    $vehicleType = $vehicle->truck_type;
+                    $transporterFromVehicle = $vehicle->transporter;
+
+                    Log::info('Vehicle found in database from vehicle_registration field', [
+                        'registration' => $extractedData['vehicle_registration'],
+                        'vehicle_type' => $vehicleType,
+                        'transporter' => $transporterFromVehicle
+                    ]);
+                }
+            }
+
+            // If still not found, calculate vehicle type
+            if (!$vehicle) {
+                Log::warning('Vehicle not found in database - will suggest based on registration count and weight', [
+                    'container_numbers' => $containerNumbers,
+                    'vehicle_registration' => $extractedData['vehicle_registration'] ?? null
+                ]);
+            }
+
+            // Get currency from parent PO
+            $currency = 'USD'; // Default
+            if ($invoice->parent_invoice_id) {
+                $parentPO = Invoice::find($invoice->parent_invoice_id);
+                if ($parentPO) {
+                    $currency = $parentPO->currency;
+                }
+            } else {
+                // If no parent PO, use invoice currency
+                $currency = $invoice->currency;
+            }
+
+            // Use transporter from vehicle database if available, otherwise use extracted data
+            $transporterName = $transporterFromVehicle ?? $extractedData['transporter'] ?? null;
+
+            // Try to find transporter ID from transporter name
+            $transporterId = null;
+            if ($transporterName) {
+                $transporter = \App\Models\Transporter::findByName($transporterName);
+                if ($transporter) {
+                    $transporterId = $transporter->id;
+                    Log::info('Transporter found in database', [
+                        'name' => $transporterName,
+                        'transporter_id' => $transporterId
+                    ]);
+                } else {
+                    Log::warning('Transporter not found in database', [
+                        'name' => $transporterName
+                    ]);
+                }
+            }
+
+            // Parse container numbers to get truck and trailer registrations
+            // Container numbers can have duplicates (horse appears twice)
+            // Note: $containerNumbers already defined above for vehicle lookup
+            $uniqueRegistrations = array_values(array_unique($containerNumbers));
+
+            $truckReg = $uniqueRegistrations[0] ?? $extractedData['vehicle_registration'] ?? null;
+            $trailer1Reg = $uniqueRegistrations[1] ?? null;
+            $trailer2Reg = $uniqueRegistrations[2] ?? null;
+
+            // Suggest vehicle type based on registration count and invoice weight
+            $registrationCount = count($uniqueRegistrations);
+            $expectedWeight = $invoice->expected_weight_kg ?? 0;
+            $suggestedVehicleType = $this->suggestVehicleType($registrationCount, $expectedWeight);
+
+            // Use suggested vehicle type ONLY if we don't have one from database
+            if (!$vehicleType && $registrationCount > 0) {
+                $vehicleType = $suggestedVehicleType;
+            }
+
+            // Get addresses from supplier and customer
+            $supplier = $invoice->supplier;
+            $customer = $invoice->customer;
+
+            $collectionAddress = $supplier ? $supplier->address : null;
+            // Get delivery address from invoice, not customer (invoices have specific delivery locations)
+            $deliveryAddress = $invoice->delivery_address ?? null;
+
+            // Get default contact from invoice's department (if exists)
+            $contactForNucleus = null;
+            if ($invoice->department_id) {
+                $department = \App\Models\Department::find($invoice->department_id);
+                if ($department && $department->loadconfirmation_contacts) {
+                    $contactForNucleus = $department->loadconfirmation_contacts;
+                }
+            }
+
+            // Get agents from invoice
+            $clearingAgent = $invoice->exit_agent;
+            $entryAgent = $invoice->entry_agent;
+
+            // Calculate special instructions based on vehicle type
+            $specialInstructions = $this->calculateSpecialInstructions($vehicleType);
+
+            // Create temporary file reference based on invoice number
+            $tempFileReference = 'LC-' . $invoice->invoice_number . '-' . now()->timestamp;
+
+            // Check if load confirmation already exists for this invoice via pivot table
+            $existingLC = $invoice->loadConfirmations()->first();
+
+            if (!$existingLC) {
+                // Create new load confirmation
+                $loadConfirmation = LoadConfirmation::create([
+                    'file_reference' => $tempFileReference,
+                    'confirmation_date' => $this->parseLoadConfirmationDate($extractedData['date_loaded'] ?? null), // Date loaded from handwriting
+                    'collection_date' => $this->parseLoadConfirmationDate($extractedData['date_loaded'] ?? null), // Same as confirmation date for now
+                    'transporter_id' => $transporterId,
+                    'transporter_name' => $transporterName,
+                    'attention' => $extractedData['driver_name'] ?? null, // Driver name goes in attention field
+                    'contact_details' => $extractedData['driver_contact'] ?? null, // Driver contact goes here
+                    'currency' => $currency, // From parent PO
+                    'vehicle_type' => $vehicleType, // From vehicles table or calculated
+                    'truck_registration' => $truckReg,
+                    'trailer_1_registration' => $trailer1Reg,
+                    'trailer_2_registration' => $trailer2Reg,
+                    'clearing_agent' => $clearingAgent,
+                    'entry_agent' => $entryAgent,
+                    'collection_address' => $collectionAddress,
+                    'collection_address_2' => null, // Manual entry by user
+                    'delivery_address' => $deliveryAddress,
+                    'commodity_description' => 'Mining Equipment', // Default, user will edit
+                    'contact_for_nucleus_drc' => $contactForNucleus, // From invoice's department
+                    'straps' => $specialInstructions['straps'],
+                    'chains' => $specialInstructions['chains'],
+                    'tarpaulin' => $specialInstructions['tarpaulin'],
+                    'corner_plates' => $specialInstructions['corner_plates'],
+                    'uprights' => $specialInstructions['uprights'],
+                    'rubber_protection' => $specialInstructions['rubber_protection'],
+                    'status' => 'transport_confirmed', // Already loaded
+                ]);
+
+                // Link load confirmation to invoice via pivot table
+                $invoice->loadConfirmations()->attach($loadConfirmation->id, [
+                    'added_at' => now()
+                ]);
+
+                Log::info('Load confirmation created and linked to invoice', [
+                    'load_confirmation_id' => $loadConfirmation->id,
+                    'invoice_id' => $invoice->id,
+                    'file_reference' => $tempFileReference,
+                    'truck' => $truckReg,
+                    'trailer1' => $trailer1Reg,
+                    'trailer2' => $trailer2Reg
+                ]);
+            } else {
+                // Update existing load confirmation with actual loading data
+                $loadConfirmation = $existingLC;
+                $loadConfirmation->update([
+                    'confirmation_date' => $this->parseLoadConfirmationDate($extractedData['date_loaded'] ?? null) ?? $loadConfirmation->confirmation_date,
+                    'collection_date' => $this->parseLoadConfirmationDate($extractedData['date_loaded'] ?? null) ?? $loadConfirmation->collection_date,
+                    'transporter_id' => $transporterId ?? $loadConfirmation->transporter_id,
+                    'transporter_name' => $transporterName ?? $loadConfirmation->transporter_name,
+                    'attention' => $extractedData['driver_name'] ?? $loadConfirmation->attention,
+                    'contact_details' => $extractedData['driver_contact'] ?? $loadConfirmation->contact_details,
+                    'vehicle_type' => $vehicleType ?? $loadConfirmation->vehicle_type,
+                    'truck_registration' => $truckReg ?? $loadConfirmation->truck_registration,
+                    'trailer_1_registration' => $trailer1Reg ?? $loadConfirmation->trailer_1_registration,
+                    'trailer_2_registration' => $trailer2Reg ?? $loadConfirmation->trailer_2_registration,
+                    'clearing_agent' => $clearingAgent ?? $loadConfirmation->clearing_agent,
+                    'entry_agent' => $entryAgent ?? $loadConfirmation->entry_agent,
+                    'collection_address' => $collectionAddress ?? $loadConfirmation->collection_address,
+                    'delivery_address' => $deliveryAddress ?? $loadConfirmation->delivery_address,
+                    'currency' => $currency,
+                    'status' => 'transport_confirmed',
+                ]);
+
+                Log::info('Load confirmation updated from extraction', [
+                    'load_confirmation_id' => $loadConfirmation->id,
+                    'invoice_id' => $invoice->id
+                ]);
+            }
+
+            // Update invoice status to reflect that transport has been arranged and vehicle loaded
+            $invoice->update([
+                'status' => 'in_transit',
+                'current_stage' => 'in_transit',
+            ]);
+
+            Log::info('Invoice status updated after load confirmation', [
+                'invoice_id' => $invoice->id,
+                'invoice_number' => $invoice->invoice_number,
+                'new_status' => 'in_transit'
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Load confirmation processed successfully',
+                'data' => [
+                    'load_confirmation_id' => $loadConfirmation->id,
+                    'invoice_id' => $invoice->id,
+                    'invoice_number' => $invoiceNumber
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Upload load confirmation PDF error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Webhook endpoint for n8n to send extracted load confirmation data from Gemini
+     *
+     * Expected payload from n8n:
+     * {
+     *   "invoice_number": "IN018197",
+     *   "extracted_data": {
+     *     "total_weight_kg": 32000,
+     *     "container_numbers": ["JN42XZGP", "JC 96 JMGP", "JC 46JN GP"],
+     *     "driver_name": "Tawoma",
+     *     "driver_contact": "+263 77 5 600097",
+     *     "date_loaded": "2025-10-23",
+     *     "time_loaded": "08:00",
+     *     "transporter": "Nucleus",
+     *     "vehicle_registration": "JN42X2SGP",
+     *     "loaded_by": "Elriko"
+     *   }
+     * }
+     */
+    public function receiveLoadConfirmationExtraction(Request $request): JsonResponse
+    {
+        try {
+            Log::info('Received load confirmation extraction from n8n', ['payload' => $request->all()]);
+
+            $validated = $request->validate([
+                'invoice_number' => 'required|string',
+                'extracted_data' => 'required|array',
+                'extracted_data.total_weight_kg' => 'nullable|numeric',
+                'extracted_data.container_numbers' => 'nullable|array',
+                'extracted_data.driver_name' => 'nullable|string',
+                'extracted_data.driver_contact' => 'nullable|string',
+                'extracted_data.date_loaded' => 'nullable|date',
+                'extracted_data.time_loaded' => 'nullable|string',
+                'extracted_data.transporter' => 'nullable|string',
+                'extracted_data.vehicle_registration' => 'nullable|string',
+                'extracted_data.loaded_by' => 'nullable|string',
+                'document' => 'nullable|array', // PDF document data from n8n
+                'document.original_filename' => 'required_with:document|string',
+                'document.file_path' => 'required_with:document|string',
+                'document.file_size_bytes' => 'nullable|integer',
+            ]);
+
+            // Find invoice by invoice number
+            $invoice = Invoice::where('invoice_number', $validated['invoice_number'])->first();
+
+            if (!$invoice) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Invoice not found',
+                    'message' => "No invoice found with number: {$validated['invoice_number']}"
+                ], 404);
+            }
+
+            $extractedData = $validated['extracted_data'];
+
+            // Update invoice with actual weight if provided
+            if (!empty($extractedData['total_weight_kg'])) {
+                $invoice->actual_weight_kg = $extractedData['total_weight_kg'];
+                $invoice->save();
+            }
+
+            // Lookup vehicle details from vehicles table
+            $vehicle = null;
+            $vehicleType = null;
+            $transporterFromVehicle = null;
+
+            // Try to find vehicle from container_numbers array (more reliable than single vehicle_registration field)
+            $containerNumbers = $extractedData['container_numbers'] ?? [];
+            $vehicle = null;
+
+            foreach ($containerNumbers as $registration) {
+                $vehicle = \App\Models\Vehicle::findByRegistration($registration);
+                if ($vehicle) {
+                    $vehicleType = $vehicle->truck_type;
+                    $transporterFromVehicle = $vehicle->transporter;
+
+                    Log::info('Vehicle found in database from container numbers', [
+                        'searched_registration' => $registration,
+                        'vehicle_type' => $vehicleType,
+                        'transporter' => $transporterFromVehicle
+                    ]);
+                    break; // Found a match, stop searching
+                }
+            }
+
+            // Fallback: If not found in container_numbers, try vehicle_registration field
+            if (!$vehicle && !empty($extractedData['vehicle_registration'])) {
+                $vehicle = \App\Models\Vehicle::findByRegistration($extractedData['vehicle_registration']);
+
+                if ($vehicle) {
+                    $vehicleType = $vehicle->truck_type;
+                    $transporterFromVehicle = $vehicle->transporter;
+
+                    Log::info('Vehicle found in database from vehicle_registration field', [
+                        'registration' => $extractedData['vehicle_registration'],
+                        'vehicle_type' => $vehicleType,
+                        'transporter' => $transporterFromVehicle
+                    ]);
+                }
+            }
+
+            // If still not found, calculate vehicle type
+            if (!$vehicle) {
+                Log::warning('Vehicle not found in database - will suggest based on registration count and weight', [
+                    'container_numbers' => $containerNumbers,
+                    'vehicle_registration' => $extractedData['vehicle_registration'] ?? null
+                ]);
+            }
+
+            // Get currency from parent PO
+            $currency = 'USD'; // Default
+            if ($invoice->parent_invoice_id) {
+                $parentPO = Invoice::find($invoice->parent_invoice_id);
+                if ($parentPO) {
+                    $currency = $parentPO->currency;
+                }
+            } else {
+                // If no parent PO, use invoice currency
+                $currency = $invoice->currency;
+            }
+
+            // Use transporter from vehicle database if available, otherwise use extracted data
+            $transporterName = $transporterFromVehicle ?? $extractedData['transporter'] ?? null;
+
+            // Try to find transporter ID from transporter name
+            $transporterId = null;
+            if ($transporterName) {
+                $transporter = \App\Models\Transporter::findByName($transporterName);
+                if ($transporter) {
+                    $transporterId = $transporter->id;
+                    Log::info('Transporter found in database', [
+                        'name' => $transporterName,
+                        'transporter_id' => $transporterId
+                    ]);
+                } else {
+                    Log::warning('Transporter not found in database', [
+                        'name' => $transporterName
+                    ]);
+                }
+            }
+
+            // Parse container numbers to get truck and trailer registrations
+            // Container numbers can have duplicates (horse appears twice)
+            // Note: $containerNumbers already defined above for vehicle lookup
+            $uniqueRegistrations = array_values(array_unique($containerNumbers));
+
+            $truckReg = $uniqueRegistrations[0] ?? $extractedData['vehicle_registration'] ?? null;
+            $trailer1Reg = $uniqueRegistrations[1] ?? null;
+            $trailer2Reg = $uniqueRegistrations[2] ?? null;
+
+            // Suggest vehicle type based on registration count and invoice weight
+            $registrationCount = count($uniqueRegistrations);
+            $expectedWeight = $invoice->expected_weight_kg ?? 0;
+            $suggestedVehicleType = $this->suggestVehicleType($registrationCount, $expectedWeight);
+
+            // Use suggested vehicle type ONLY if we don't have one from database
+            if (!$vehicleType && $registrationCount > 0) {
+                $vehicleType = $suggestedVehicleType;
+            }
+
+            // Get addresses from supplier and customer
+            $supplier = $invoice->supplier;
+            $customer = $invoice->customer;
+
+            $collectionAddress = $supplier ? $supplier->address : null;
+            // Get delivery address from invoice, not customer (invoices have specific delivery locations)
+            $deliveryAddress = $invoice->delivery_address ?? null;
+
+            // Get default contact from invoice's department (if exists)
+            $contactForNucleus = null;
+            if ($invoice->department_id) {
+                $department = \App\Models\Department::find($invoice->department_id);
+                if ($department && $department->loadconfirmation_contacts) {
+                    $contactForNucleus = $department->loadconfirmation_contacts;
+                }
+            }
+
+            // Get agents from invoice
+            $clearingAgent = $invoice->exit_agent;
+            $entryAgent = $invoice->entry_agent;
+
+            // Calculate special instructions based on vehicle type
+            $specialInstructions = $this->calculateSpecialInstructions($vehicleType);
+
+            // Create temporary file reference based on invoice number
+            $tempFileReference = 'LC-' . $invoice->invoice_number . '-' . now()->timestamp;
+
+            // Check if load confirmation already exists for this invoice via pivot table
+            $existingLC = $invoice->loadConfirmations()->first();
+
+            if (!$existingLC) {
+                // Create new load confirmation
+                $loadConfirmation = LoadConfirmation::create([
+                    'file_reference' => $tempFileReference,
+                    'confirmation_date' => $this->parseLoadConfirmationDate($extractedData['date_loaded'] ?? null), // Date loaded from handwriting
+                    'collection_date' => $this->parseLoadConfirmationDate($extractedData['date_loaded'] ?? null), // Same as confirmation date for now
+                    'transporter_id' => $transporterId,
+                    'transporter_name' => $transporterName,
+                    'attention' => $extractedData['driver_name'] ?? null, // Driver name goes in attention field
+                    'contact_details' => $extractedData['driver_contact'] ?? null, // Driver contact goes here
+                    'currency' => $currency, // From parent PO
+                    'vehicle_type' => $vehicleType, // From vehicles table or calculated
+                    'truck_registration' => $truckReg,
+                    'trailer_1_registration' => $trailer1Reg,
+                    'trailer_2_registration' => $trailer2Reg,
+                    'clearing_agent' => $clearingAgent,
+                    'entry_agent' => $entryAgent,
+                    'collection_address' => $collectionAddress,
+                    'collection_address_2' => null, // Manual entry by user
+                    'delivery_address' => $deliveryAddress,
+                    'commodity_description' => 'Mining Equipment', // Default, user will edit
+                    'contact_for_nucleus_drc' => $contactForNucleus, // From invoice's department
+                    'straps' => $specialInstructions['straps'],
+                    'chains' => $specialInstructions['chains'],
+                    'tarpaulin' => $specialInstructions['tarpaulin'],
+                    'corner_plates' => $specialInstructions['corner_plates'],
+                    'uprights' => $specialInstructions['uprights'],
+                    'rubber_protection' => $specialInstructions['rubber_protection'],
+                    'status' => 'transport_confirmed', // Already loaded
+                ]);
+
+                // Link load confirmation to invoice via pivot table
+                $invoice->loadConfirmations()->attach($loadConfirmation->id, [
+                    'added_at' => now()
+                ]);
+
+                Log::info('Load confirmation created and linked to invoice', [
+                    'load_confirmation_id' => $loadConfirmation->id,
+                    'invoice_id' => $invoice->id,
+                    'file_reference' => $tempFileReference,
+                    'truck' => $truckReg,
+                    'trailer1' => $trailer1Reg,
+                    'trailer2' => $trailer2Reg
+                ]);
+            } else {
+                // Update existing load confirmation with actual loading data
+                $loadConfirmation = $existingLC;
+                $loadConfirmation->update([
+                    'confirmation_date' => $this->parseLoadConfirmationDate($extractedData['date_loaded'] ?? null) ?? $loadConfirmation->confirmation_date,
+                    'collection_date' => $this->parseLoadConfirmationDate($extractedData['date_loaded'] ?? null) ?? $loadConfirmation->collection_date,
+                    'transporter_id' => $transporterId ?? $loadConfirmation->transporter_id,
+                    'transporter_name' => $transporterName ?? $loadConfirmation->transporter_name,
+                    'attention' => $extractedData['driver_name'] ?? $loadConfirmation->attention,
+                    'contact_details' => $extractedData['driver_contact'] ?? $loadConfirmation->contact_details,
+                    'vehicle_type' => $vehicleType ?? $loadConfirmation->vehicle_type,
+                    'truck_registration' => $truckReg ?? $loadConfirmation->truck_registration,
+                    'trailer_1_registration' => $trailer1Reg ?? $loadConfirmation->trailer_1_registration,
+                    'trailer_2_registration' => $trailer2Reg ?? $loadConfirmation->trailer_2_registration,
+                    'clearing_agent' => $clearingAgent ?? $loadConfirmation->clearing_agent,
+                    'entry_agent' => $entryAgent ?? $loadConfirmation->entry_agent,
+                    'collection_address' => $collectionAddress ?? $loadConfirmation->collection_address,
+                    'delivery_address' => $deliveryAddress ?? $loadConfirmation->delivery_address,
+                    'currency' => $currency,
+                    'status' => 'transport_confirmed',
+                ]);
+
+                Log::info('Load confirmation updated from extraction', [
+                    'load_confirmation_id' => $loadConfirmation->id,
+                    'invoice_id' => $invoice->id
+                ]);
+            }
+
+            // Save load confirmation PDF document if provided by n8n
+            if (isset($validated['document'])) {
+                $docData = $validated['document'];
+
+                // Check if document already exists for this load confirmation
+                $existingDoc = Document::where('invoice_id', $invoice->id)
+                    ->where('original_filename', $docData['original_filename'])
+                    ->first();
+
+                if (!$existingDoc) {
+                    Document::create([
+                        'invoice_id' => $invoice->id,
+                        'document_type' => 'other', // Load confirmations are categorized as 'other'
+                        'document_subtype' => 'load_confirmation',
+                        'original_filename' => $docData['original_filename'],
+                        'file_path' => $docData['file_path'],
+                        'file_size_bytes' => $docData['file_size_bytes'] ?? 0,
+                        'extracted_data' => $extractedData,
+                        'classification_confidence' => null,
+                        'uploaded_by' => null, // System upload from n8n
+                    ]);
+
+                    Log::info('Load confirmation PDF saved to documents table', [
+                        'invoice_id' => $invoice->id,
+                        'load_confirmation_id' => $loadConfirmation->id,
+                        'filename' => $docData['original_filename'],
+                        'file_path' => $docData['file_path']
+                    ]);
+                } else {
+                    Log::info('Load confirmation PDF already exists', [
+                        'document_id' => $existingDoc->id,
+                        'filename' => $docData['original_filename']
+                    ]);
+                }
+
+                // Mark PDF as generated so "Generate Manifest" action becomes available
+                $loadConfirmation->pdf_generated = true;
+                $loadConfirmation->save();
+
+                Log::info('Load confirmation marked as pdf_generated = true', [
+                    'load_confirmation_id' => $loadConfirmation->id
+                ]);
+            }
+
+            // Update invoice status to reflect that transport has been arranged and vehicle loaded
+            $invoice->update([
+                'status' => 'in_transit',
+                'current_stage' => 'in_transit',
+            ]);
+
+            Log::info('Invoice status updated after load confirmation', [
+                'invoice_id' => $invoice->id,
+                'invoice_number' => $invoice->invoice_number,
+                'new_status' => 'in_transit'
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Load confirmation processed successfully',
+                'data' => [
+                    'load_confirmation_id' => $loadConfirmation->id,
+                    'invoice_id' => $invoice->id,
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Load confirmation extraction webhook error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to process load confirmation extraction',
                 'message' => $e->getMessage()
             ], 500);
         }
@@ -720,6 +1376,12 @@ class WebhookController extends Controller
                 'invoice_id' => $invoice->id,
             ]);
 
+            // Auto-calculate expected_weight_kg from line items if not already set
+            $invoice->refresh(); // Reload to get line items
+            if (!$invoice->expected_weight_kg && $invoice->lineItems()->count() > 0) {
+                $invoice->updateExpectedWeightFromLineItems();
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Invoice created successfully',
@@ -737,6 +1399,211 @@ class WebhookController extends Controller
                 'error' => 'Failed to acknowledge document',
                 'message' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Calculate vehicle type based on weight and package count
+     * Business rules:
+     * - < 1000 kg: 1 TON
+     * - 1000-2000 kg: 2 TON
+     * - 2000-4000 kg: 4 TON
+     * - 4000-8000 kg: 8 TON
+     * - 8000-10000 kg: 10 TON
+     * - 10000-12000 kg: 12 TON
+     * - 12000-15000 kg: 15 TON
+     * - > 15000 kg: Check package count
+     *   - > 30 packages: SUPERLINK
+     *   - <= 30 packages: TRI-AXLE
+     */
+    private function calculateVehicleType(Invoice $invoice, ?float $weight): ?string
+    {
+        // Use provided weight or invoice weight
+        $totalWeight = $weight ?? $invoice->actual_weight_kg ?? $invoice->expected_weight_kg;
+
+        if (!$totalWeight) {
+            Log::warning('Cannot calculate vehicle type: no weight data');
+            return null;
+        }
+
+        // Weight-based calculation for smaller trucks
+        if ($totalWeight < 1000) {
+            return '1 TON';
+        } elseif ($totalWeight < 2000) {
+            return '2 TON';
+        } elseif ($totalWeight < 4000) {
+            return '4 TON';
+        } elseif ($totalWeight < 8000) {
+            return '8 TON';
+        } elseif ($totalWeight < 10000) {
+            return '10 TON';
+        } elseif ($totalWeight < 12000) {
+            return '12 TON';
+        } elseif ($totalWeight < 15000) {
+            return '15 TON';
+        }
+
+        // For heavy loads (> 15000 kg), use package count to distinguish
+        // between SUPERLINK and TRI-AXLE
+        $packageCount = DB::table('packing_details')
+            ->where('invoice_id', $invoice->id)
+            ->sum('quantity');
+
+        Log::info('Calculating vehicle type for heavy load', [
+            'weight' => $totalWeight,
+            'package_count' => $packageCount
+        ]);
+
+        if ($packageCount > 30) {
+            return 'SUPERLINK';
+        } else {
+            return 'TRI-AXLE';
+        }
+    }
+
+    /**
+     * Suggest vehicle type based on registration count and invoice weight
+     *
+     * @param int $registrationCount Number of unique vehicle registrations
+     * @param float $weightKg Invoice expected weight in kilograms
+     * @return string|null Suggested vehicle type
+     */
+    private function suggestVehicleType(int $registrationCount, float $weightKg): ?string
+    {
+        // Priority 1: Base suggestion on registration count
+        if ($registrationCount === 3) {
+            // 3 registrations = truck + 2 trailers = SUPERLINK
+            return 'SUPERLINK';
+        } elseif ($registrationCount === 2) {
+            // 2 registrations = truck + 1 trailer = TRI-AXLE
+            return 'TRI-AXLE';
+        }
+
+        // Priority 2: Base suggestion on weight if we have 1 registration
+        if ($registrationCount === 1) {
+            // Heavy loads
+            if ($weightKg >= 30000) {
+                return 'SUPERLINK';
+            } elseif ($weightKg >= 15000) {
+                return 'TRI-AXLE';
+            } elseif ($weightKg >= 12000) {
+                return '15 TON';
+            } elseif ($weightKg >= 10000) {
+                return '12 TON';
+            } elseif ($weightKg >= 8000) {
+                return '10 TON';
+            } else {
+                return '8 TON';
+            }
+        }
+
+        // No registrations found - return null to let user select manually
+        return null;
+    }
+
+    /**
+     * Calculate special instructions based on vehicle type
+     * These are load securing requirements
+     */
+    private function calculateSpecialInstructions(?string $vehicleType): array
+    {
+        // Default: all false
+        $instructions = [
+            'straps' => false,
+            'chains' => false,
+            'tarpaulin' => false,
+            'corner_plates' => false,
+            'uprights' => false,
+            'rubber_protection' => false,
+        ];
+
+        if (!$vehicleType) {
+            return $instructions;
+        }
+
+        // Heavy vehicles (SUPERLINK, TRI-AXLE) require more securing
+        if (in_array($vehicleType, ['SUPERLINK', 'TRI-AXLE'])) {
+            $instructions['straps'] = true;
+            $instructions['chains'] = true;
+            $instructions['tarpaulin'] = true;
+            $instructions['corner_plates'] = true;
+            $instructions['uprights'] = true;
+            $instructions['rubber_protection'] = true;
+        }
+        // Medium to large trucks (>= 8 TON)
+        elseif (in_array($vehicleType, ['8 TON', '10 TON', '12 TON', '15 TON'])) {
+            $instructions['straps'] = true;
+            $instructions['chains'] = true;
+            $instructions['tarpaulin'] = true;
+            $instructions['corner_plates'] = true;
+        }
+        // Smaller trucks
+        else {
+            $instructions['straps'] = true;
+            $instructions['tarpaulin'] = true;
+        }
+
+        return $instructions;
+    }
+
+    /**
+     * Parse date from various formats commonly found in handwritten load confirmations
+     * Handles: DD/MM, DD/MM/YYYY, YYYY-MM-DD
+     *
+     * @param string|null $dateString
+     * @return string|null Returns YYYY-MM-DD format or null
+     */
+    private function parseLoadConfirmationDate(?string $dateString): ?string
+    {
+        if (empty($dateString)) {
+            return null;
+        }
+
+        // Clean up the date string
+        $dateString = trim($dateString);
+
+        try {
+            // If already in YYYY-MM-DD format, return as is
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateString)) {
+                return $dateString;
+            }
+
+            // Handle DD/MM format (assume current year)
+            if (preg_match('/^(\d{1,2})\/(\d{1,2})$/', $dateString, $matches)) {
+                $day = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+                $month = str_pad($matches[2], 2, '0', STR_PAD_LEFT);
+                $year = date('Y');
+
+                // Validate the date
+                if (checkdate((int)$month, (int)$day, (int)$year)) {
+                    return "$year-$month-$day";
+                }
+            }
+
+            // Handle DD/MM/YYYY or DD/MM/YY format
+            if (preg_match('/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/', $dateString, $matches)) {
+                $day = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+                $month = str_pad($matches[2], 2, '0', STR_PAD_LEFT);
+                $year = $matches[3];
+
+                // Convert 2-digit year to 4-digit
+                if (strlen($year) == 2) {
+                    $year = (int)$year < 50 ? '20' . $year : '19' . $year;
+                }
+
+                // Validate the date
+                if (checkdate((int)$month, (int)$day, (int)$year)) {
+                    return "$year-$month-$day";
+                }
+            }
+
+            // Try Carbon as fallback
+            $carbonDate = \Carbon\Carbon::parse($dateString);
+            return $carbonDate->format('Y-m-d');
+
+        } catch (\Exception $e) {
+            \Log::warning("Failed to parse date '$dateString': " . $e->getMessage());
+            return null;
         }
     }
 }
