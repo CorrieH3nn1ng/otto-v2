@@ -74,6 +74,52 @@
 
 ---
 
+## Package-Level Manifest Management
+
+### ⚠️ CRITICAL: Manifests work at PACKAGE level, not invoice level!
+
+**What this means:**
+- One invoice can have packages on multiple manifests (split shipments)
+- One manifest can have packages from multiple invoices (mixed loads)
+- You control which individual packages go on which manifest
+
+### Add Packages to Manifest
+1. Open manifest detail → **INVOICES** tab
+2. Click **+ ADD INVOICE**
+3. Click the **Qty number** (e.g., "7") for the invoice
+4. **Select specific packages** to add (not all required!)
+5. Click "Add X Package(s)"
+6. ✅ Only selected packages assigned to manifest
+
+### Remove Packages from Manifest
+1. Open manifest detail → **INVOICES** tab
+2. Click the **Packages number** (e.g., "3") for the invoice
+3. **Select packages to remove**
+4. Click "Remove X Package(s)"
+5. ✅ Selected packages removed, others stay
+
+### Understanding Package Status
+- 🟢 **Green chip**: Package on this manifest
+- 🟡 **Yellow chip**: Package on different manifest
+- ⚪ **White chip**: Package not assigned yet
+
+### Quick Examples
+
+**Split Shipment:**
+- Invoice IN018177 has 7 packages
+- Add 3 packages to Manifest A
+- Add 4 packages to Manifest B
+- Result: One invoice split across two trucks
+
+**Mixed Load:**
+- Manifest S00037754 needs to fill capacity
+- Add 2 packages from Invoice A
+- Add 5 packages from Invoice B
+- Add 3 packages from Invoice C
+- Result: Optimized truck load from multiple orders
+
+---
+
 ## Keyboard Shortcuts
 
 - `Ctrl + F5` (Windows) or `Cmd + Shift + R` (Mac): Hard refresh

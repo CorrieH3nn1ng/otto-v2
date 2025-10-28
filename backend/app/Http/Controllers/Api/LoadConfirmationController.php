@@ -22,7 +22,8 @@ class LoadConfirmationController extends Controller
             'transporter',
             'invoices.supplier',
             'invoices.customer',
-            'invoices.packingDetails'
+            'invoices.packingDetails',
+            'manifests'
         ]);
 
         // Filter by status if provided

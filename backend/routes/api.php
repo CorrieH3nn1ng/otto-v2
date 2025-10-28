@@ -108,6 +108,14 @@ Route::prefix('manifests')->group(function () {
     Route::post('/{id}/mark-delivered', [ManifestController::class, 'markDelivered']);
     Route::post('/{id}/attach-invoices', [ManifestController::class, 'attachInvoices']);
     Route::post('/{id}/detach-invoices', [ManifestController::class, 'detachInvoices']);
+    Route::post('/{id}/attach-packages', [ManifestController::class, 'attachPackages']);
+    Route::post('/{id}/detach-packages', [ManifestController::class, 'detachPackages']);
+
+    // Document management routes
+    Route::get('/{id}/documents', [ManifestController::class, 'getDocuments']);
+    Route::post('/{id}/documents', [ManifestController::class, 'uploadDocument']);
+    Route::delete('/{manifestId}/documents/{documentId}', [ManifestController::class, 'deleteDocument']);
+    Route::get('/{manifestId}/documents/{documentId}/download', [ManifestController::class, 'downloadDocument']);
 });
 
 // Webhook routes for n8n integration

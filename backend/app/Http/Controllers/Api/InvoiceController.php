@@ -20,7 +20,7 @@ class InvoiceController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Invoice::with(['customer', 'supplier', 'documents', 'packingDetails']);
+        $query = Invoice::with(['customer', 'supplier', 'documents', 'packingDetails', 'loadConfirmations', 'manifests']);
 
         // Filter by current owner
         if ($request->has('owner')) {

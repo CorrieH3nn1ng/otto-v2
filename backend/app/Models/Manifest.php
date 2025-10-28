@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Manifest extends Model
 {
@@ -41,5 +42,10 @@ class Manifest extends Model
     {
         return $this->belongsToMany(Invoice::class, 'invoice_manifest')
             ->withTimestamps();
+    }
+
+    public function documents(): HasMany
+    {
+        return $this->hasMany(Document::class);
     }
 }

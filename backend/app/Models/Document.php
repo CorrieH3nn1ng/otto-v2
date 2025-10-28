@@ -9,6 +9,7 @@ class Document extends Model
 {
     protected $fillable = [
         'invoice_id',
+        'manifest_id',
         'document_type',
         'document_subtype',
         'original_filename',
@@ -28,5 +29,10 @@ class Document extends Model
     public function invoice(): BelongsTo
     {
         return $this->belongsTo(Invoice::class);
+    }
+
+    public function manifest(): BelongsTo
+    {
+        return $this->belongsTo(Manifest::class);
     }
 }

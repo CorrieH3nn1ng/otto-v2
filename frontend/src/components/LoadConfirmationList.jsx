@@ -27,6 +27,7 @@ import {
   InputLabel,
   FormControl,
   InputAdornment,
+  Checkbox,
 } from '@mui/material';
 import {
   MoreVert as MoreVertIcon,
@@ -86,6 +87,7 @@ export default function LoadConfirmationList() {
   const [manifestDialogOpen, setManifestDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [hideManifested, setHideManifested] = useState(true);
   const [orderBy, setOrderBy] = useState('id');
   const [order, setOrder] = useState('desc');
   const [emailForm, setEmailForm] = useState({
@@ -128,7 +130,7 @@ export default function LoadConfirmationList() {
   // Reset to first page when filters change
   useEffect(() => {
     setPage(0);
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, statusFilter, hideManifested]);
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
@@ -330,10 +332,18 @@ export default function LoadConfirmationList() {
     return Boolean(lc.pdf_generated) || Boolean(lc.email_sent);
   };
 
-  const handleGenerateManifest = () => {
+  const handleGenerateManifest = async () => {
     if (!selectedLC) return;
-    setManifestDialogOpen(true);
-    handleMenuClose();
+    try {
+      // Fetch fresh data from API to ensure we have the latest load confirmation data
+      const freshData = await loadConfirmationService.getById(selectedLC.id);
+      setSelectedLC(freshData);
+      setManifestDialogOpen(true);
+      handleMenuClose();
+    } catch (error) {
+      console.error('Error fetching load confirmation:', error);
+      enqueueSnackbar('Failed to load load confirmation details', { variant: 'error' });
+    }
   };
 
   const handleManifestSuccess = (manifest) => {
@@ -378,6 +388,16 @@ export default function LoadConfirmationList() {
   // Filter and sort load confirmations
   const getFilteredLoadConfirmations = () => {
     let filtered = [...loadConfirmations];
+
+    // Apply manifest filter - hide load confirmations that have manifests
+    if (hideManifested) {
+      filtered = filtered.filter(lc => {
+        // Hide if this load confirmation has any manifests
+        // Use optional chaining and handle undefined/null cases
+        const hasManifests = Array.isArray(lc.manifests) && lc.manifests.length > 0;
+        return !hasManifests;
+      });
+    }
 
     // Apply search filter
     if (searchTerm.trim()) {
@@ -611,6 +631,20 @@ export default function LoadConfirmationList() {
               <MenuItem value="cancelled">Cancelled</MenuItem>
             </Select>
           </FormControl>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'white', px: 2, py: 0.5, borderRadius: 1 }}>
+            <Checkbox
+              checked={hideManifested}
+              onChange={(e) => setHideManifested(e.target.checked)}
+              size="small"
+              sx={{
+                color: '#38b2ac',
+                '&.Mui-checked': { color: '#38b2ac' },
+              }}
+            />
+            <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>
+              Hide Manifested
+            </Typography>
+          </Box>
           <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
             Showing {filteredLoadConfirmations.length} of {loadConfirmations.length} load confirmations
           </Typography>

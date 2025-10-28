@@ -190,17 +190,25 @@ export default function ManifestForm({ loadConfirmation: initialLoadConfirmation
 
     const totalPackages = selectedRows.reduce((sum, row) => {
       const items = row.packingDetails || row.packing_details || [];
-      return sum + items.length;
+      return sum + items.reduce((pkgSum, pkg) => pkgSum + (parseInt(pkg.quantity) || 1), 0);
     }, 0);
 
     const totalWeight = selectedRows.reduce((sum, row) => {
       const items = row.packingDetails || row.packing_details || [];
-      return sum + items.reduce((w, pkg) => w + (parseFloat(pkg.gross_weight_kg) || 0), 0);
+      return sum + items.reduce((w, pkg) => {
+        const quantity = parseInt(pkg.quantity) || 1;
+        const weight = parseFloat(pkg.gross_weight_kg) || 0;
+        return w + (quantity * weight);
+      }, 0);
     }, 0);
 
     const totalCBM = selectedRows.reduce((sum, row) => {
       const items = row.packingDetails || row.packing_details || [];
-      return sum + items.reduce((c, pkg) => c + (parseFloat(pkg.cbm) || 0), 0);
+      return sum + items.reduce((c, pkg) => {
+        const quantity = parseInt(pkg.quantity) || 1;
+        const cbm = parseFloat(pkg.cbm) || 0;
+        return c + (quantity * cbm);
+      }, 0);
     }, 0);
 
     // Count unique invoice IDs for total_invoices
@@ -476,12 +484,16 @@ export default function ManifestForm({ loadConfirmation: initialLoadConfirmation
                 // Show as selected if the invoice ID is in selection (for both linked and available)
                 const isSelected = formData.invoice_ids.includes(row.id);
                 const packingDetails = row.packingDetails || [];
-                const totalWeight = packingDetails.reduce((sum, pkg) =>
-                  sum + (parseFloat(pkg.gross_weight_kg) || 0), 0
-                );
-                const totalCBM = packingDetails.reduce((sum, pkg) =>
-                  sum + (parseFloat(pkg.cbm) || 0), 0
-                );
+                const totalWeight = packingDetails.reduce((sum, pkg) => {
+                  const quantity = parseInt(pkg.quantity) || 1;
+                  const weight = parseFloat(pkg.gross_weight_kg) || 0;
+                  return sum + (quantity * weight);
+                }, 0);
+                const totalCBM = packingDetails.reduce((sum, pkg) => {
+                  const quantity = parseInt(pkg.quantity) || 1;
+                  const cbm = parseFloat(pkg.cbm) || 0;
+                  return sum + (quantity * cbm);
+                }, 0);
 
                 return (
                   <TableRow
@@ -512,9 +524,9 @@ export default function ManifestForm({ loadConfirmation: initialLoadConfirmation
                       <Typography variant="body2" sx={{ fontWeight: 600 }}>
                         {row.invoice_number}
                       </Typography>
-                      {row.purchase_order_number && (
+                      {row.purchase_order && (
                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                          {row.purchase_order_number}
+                          {row.purchase_order}
                         </Typography>
                       )}
                     </TableCell>
@@ -523,9 +535,9 @@ export default function ManifestForm({ loadConfirmation: initialLoadConfirmation
                     </TableCell>
                     <TableCell>{row.supplier?.name || 'N/A'}</TableCell>
                     <TableCell>{row.customer?.name || 'N/A'}</TableCell>
-                    <TableCell>{row.purchase_order_number || '-'}</TableCell>
+                    <TableCell>{row.purchase_order || '-'}</TableCell>
                     <TableCell>
-                      {row.currency} {parseFloat(row.total_value || 0).toFixed(2)}
+                      {row.currency} {parseFloat(row.total_amount || 0).toFixed(2)}
                     </TableCell>
                     <TableCell>{packingDetails.length}</TableCell>
                     <TableCell>{totalWeight.toFixed(2)}</TableCell>

@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(curl:*)",
+      "Bash(npm run dev:*)",
+      "Bash(php artisan serve:*)",
+      "Bash(npm run build:*)",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT id, invoice_number, purchase_order_number, total_value, currency FROM invoices WHERE invoice_number = ''IN018177'';\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"DESCRIBE invoices;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\":*)",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"DESCRIBE packing_details;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT pd.id, pd.package_number, pd.quantity, pd.gross_weight_kg, pd.cbm, pd.file_name, (pd.quantity * pd.gross_weight_kg) as total_weight, (pd.quantity * pd.cbm) as total_cbm FROM packing_details pd JOIN invoices i ON pd.invoice_id = i.id WHERE i.invoice_number = ''IN018177'';\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"DESCRIBE manifests;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT id, manifest_number, export_date, status, created_at FROM manifests ORDER BY created_at DESC;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT COUNT(*) as total_load_confirmations FROM load_confirmations;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT COUNT(DISTINCT load_confirmation_id) as lc_with_manifests FROM manifests;\")",
+      "Bash(php artisan:*)",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT COUNT(*) as total FROM transporters;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT DISTINCT transporter FROM vehicles LIMIT 20;\")",
+      "Bash(mysql:*)",
+      "Bash(timeout 10 php:*)",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"DESCRIBE documents;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT id, name, address, delivery_address FROM customers WHERE name LIKE ''%KAMOA%'' LIMIT 5;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT id, invoice_number, current_stage, current_owner FROM invoices WHERE id = 97;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT id, invoice_id, package_number, file_name FROM packing_details WHERE invoice_id = 97;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"UPDATE packing_details SET file_name = ''S00037754'' WHERE invoice_id = 97;\")",
+      "Bash(dir:*)",
+      "Bash(python:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

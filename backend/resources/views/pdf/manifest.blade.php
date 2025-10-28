@@ -274,9 +274,12 @@
         $totalCBM = 0;
 
         foreach($manifest->invoices as $invoice) {
-            $totalPieces += $invoice->packingDetails->count();
-            $totalWeight += $invoice->packingDetails->sum('gross_weight_kg');
-            $totalCBM += $invoice->packingDetails->sum('cbm');
+            foreach($invoice->packingDetails as $detail) {
+                $quantity = $detail->quantity ?? 1;
+                $totalPieces += $quantity;
+                $totalWeight += ($detail->gross_weight_kg ?? 0) * $quantity;
+                $totalCBM += ($detail->cbm ?? 0) * $quantity;
+            }
         }
     @endphp
 

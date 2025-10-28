@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Manifest;
 use App\Models\Invoice;
+use App\Models\Document;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
 use Barryvdh\DomPDF\Facade\Pdf;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
@@ -38,7 +40,8 @@ class ManifestController extends Controller
             'loadConfirmation.transporter',
             'invoices.customer',
             'invoices.supplier',
-            'invoices.packingDetails'
+            'invoices.packingDetails',
+            'documents'
         ])->findOrFail($id);
 
         return response()->json($manifest);
@@ -263,6 +266,15 @@ class ManifestController extends Controller
 
         $manifest->invoices()->syncWithoutDetaching($validated['invoice_ids']);
 
+        // Update packing details file_name for all newly attached invoices
+        foreach ($validated['invoice_ids'] as $invoiceId) {
+            $updatedCount = \DB::table('packing_details')
+                ->where('invoice_id', $invoiceId)
+                ->update(['file_name' => $manifest->manifest_number]);
+
+            \Log::info("Updated {$updatedCount} packing_details records for invoice {$invoiceId} with file_name '{$manifest->manifest_number}'");
+        }
+
         return response()->json([
             'message' => 'Invoices attached successfully',
             'manifest' => $manifest->load('invoices')
@@ -283,9 +295,100 @@ class ManifestController extends Controller
 
         $manifest->invoices()->detach($validated['invoice_ids']);
 
+        // Clear packing details file_name for detached invoices
+        foreach ($validated['invoice_ids'] as $invoiceId) {
+            $updatedCount = \DB::table('packing_details')
+                ->where('invoice_id', $invoiceId)
+                ->where('file_name', $manifest->manifest_number)
+                ->update(['file_name' => null]);
+
+            \Log::info("Cleared file_name from {$updatedCount} packing_details records for invoice {$invoiceId}");
+        }
+
         return response()->json([
             'message' => 'Invoices detached successfully',
             'manifest' => $manifest->load('invoices')
+        ]);
+    }
+
+    /**
+     * Attach specific packages to manifest
+     */
+    public function attachPackages(Request $request, int $id): JsonResponse
+    {
+        $manifest = Manifest::findOrFail($id);
+
+        $validated = $request->validate([
+            'package_ids' => 'required|array',
+            'package_ids.*' => 'exists:packing_details,id',
+        ]);
+
+        // Update file_name for selected packages only
+        $updatedCount = \DB::table('packing_details')
+            ->whereIn('id', $validated['package_ids'])
+            ->update(['file_name' => $manifest->manifest_number]);
+
+        \Log::info("Updated {$updatedCount} packing_details records with file_name '{$manifest->manifest_number}'");
+
+        // Get unique invoice IDs from the packages
+        $invoiceIds = \DB::table('packing_details')
+            ->whereIn('id', $validated['package_ids'])
+            ->pluck('invoice_id')
+            ->unique()
+            ->toArray();
+
+        // Sync invoice relationships (without detaching existing)
+        $manifest->invoices()->syncWithoutDetaching($invoiceIds);
+
+        return response()->json([
+            'message' => 'Packages attached successfully',
+            'manifest' => $manifest->fresh()->load('invoices.packingDetails')
+        ]);
+    }
+
+    /**
+     * Detach specific packages from manifest
+     */
+    public function detachPackages(Request $request, int $id): JsonResponse
+    {
+        $manifest = Manifest::findOrFail($id);
+
+        $validated = $request->validate([
+            'package_ids' => 'required|array',
+            'package_ids.*' => 'exists:packing_details,id',
+        ]);
+
+        // Clear file_name for selected packages only
+        $updatedCount = \DB::table('packing_details')
+            ->whereIn('id', $validated['package_ids'])
+            ->where('file_name', $manifest->manifest_number)
+            ->update(['file_name' => null]);
+
+        \Log::info("Cleared file_name from {$updatedCount} packing_details records");
+
+        // Check if any packages from their invoices are still on this manifest
+        $packageInvoiceIds = \DB::table('packing_details')
+            ->whereIn('id', $validated['package_ids'])
+            ->pluck('invoice_id')
+            ->unique();
+
+        foreach ($packageInvoiceIds as $invoiceId) {
+            // Count remaining packages from this invoice on this manifest
+            $remainingPackages = \DB::table('packing_details')
+                ->where('invoice_id', $invoiceId)
+                ->where('file_name', $manifest->manifest_number)
+                ->count();
+
+            // If no packages left, detach the invoice relationship
+            if ($remainingPackages === 0) {
+                $manifest->invoices()->detach($invoiceId);
+                \Log::info("Detached invoice {$invoiceId} from manifest as no packages remain");
+            }
+        }
+
+        return response()->json([
+            'message' => 'Packages detached successfully',
+            'manifest' => $manifest->fresh()->load('invoices.packingDetails')
         ]);
     }
 
@@ -322,5 +425,94 @@ class ManifestController extends Controller
         $filename = 'Manifest_' . $manifest->manifest_number . '.pdf';
 
         return $pdf->download($filename);
+    }
+
+    /**
+     * Get all documents for a manifest
+     */
+    public function getDocuments(int $id): JsonResponse
+    {
+        $manifest = Manifest::findOrFail($id);
+        $documents = $manifest->documents()->orderBy('created_at', 'desc')->get();
+
+        return response()->json($documents);
+    }
+
+    /**
+     * Upload a document to a manifest
+     */
+    public function uploadDocument(Request $request, int $id): JsonResponse
+    {
+        $manifest = Manifest::findOrFail($id);
+
+        $validated = $request->validate([
+            'document_type' => 'required|string|in:feri_certificate,customs_declaration,bill_of_lading,coc,export_permit,other',
+            'document_subtype' => 'nullable|string',
+            'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:20480', // 20MB max
+        ]);
+
+        $file = $request->file('file');
+        $filename = time() . '_' . $file->getClientOriginalName();
+        $path = $file->storeAs('documents/manifests/' . $manifest->id, $filename, 'public');
+
+        $document = Document::create([
+            'manifest_id' => $manifest->id,
+            'document_type' => $validated['document_type'],
+            'document_subtype' => $validated['document_subtype'] ?? null,
+            'original_filename' => $file->getClientOriginalName(),
+            'file_path' => $path,
+            'file_size_bytes' => $file->getSize(),
+            'classification_confidence' => 1.0,
+            'uploaded_by' => auth()->id() ?? null,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Document uploaded successfully',
+            'document' => $document
+        ], 201);
+    }
+
+    /**
+     * Delete a document from a manifest
+     */
+    public function deleteDocument(int $manifestId, int $documentId): JsonResponse
+    {
+        $manifest = Manifest::findOrFail($manifestId);
+        $document = Document::where('manifest_id', $manifest->id)
+            ->where('id', $documentId)
+            ->firstOrFail();
+
+        // Delete file from storage
+        if (Storage::disk('public')->exists($document->file_path)) {
+            Storage::disk('public')->delete($document->file_path);
+        }
+
+        $document->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Document deleted successfully'
+        ]);
+    }
+
+    /**
+     * Download a manifest document
+     */
+    public function downloadDocument(int $manifestId, int $documentId)
+    {
+        $manifest = Manifest::findOrFail($manifestId);
+        $document = Document::where('manifest_id', $manifest->id)
+            ->where('id', $documentId)
+            ->firstOrFail();
+
+        if (!Storage::disk('public')->exists($document->file_path)) {
+            return response()->json(['error' => 'File not found'], 404);
+        }
+
+        return Storage::disk('public')->download(
+            $document->file_path,
+            $document->original_filename
+        );
     }
 }

@@ -64,6 +64,59 @@ export const manifestService = {
     });
     return response.data;
   },
+
+  // Attach specific packages to manifest
+  attachPackages: async (id, packageIds) => {
+    const response = await api.post(`/manifests/${id}/attach-packages`, {
+      package_ids: packageIds
+    });
+    return response.data;
+  },
+
+  // Detach specific packages from manifest
+  detachPackages: async (id, packageIds) => {
+    const response = await api.post(`/manifests/${id}/detach-packages`, {
+      package_ids: packageIds
+    });
+    return response.data;
+  },
+
+  // Get documents for a manifest
+  getDocuments: async (id) => {
+    const response = await api.get(`/manifests/${id}/documents`);
+    return response.data;
+  },
+
+  // Upload document to manifest
+  uploadDocument: async (id, file, documentType, documentSubtype = null) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('document_type', documentType);
+    if (documentSubtype) {
+      formData.append('document_subtype', documentSubtype);
+    }
+
+    const response = await api.post(`/manifests/${id}/documents`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  // Delete document from manifest
+  deleteDocument: async (manifestId, documentId) => {
+    const response = await api.delete(`/manifests/${manifestId}/documents/${documentId}`);
+    return response.data;
+  },
+
+  // Download manifest document
+  downloadDocument: async (manifestId, documentId) => {
+    const response = await api.get(`/manifests/${manifestId}/documents/${documentId}/download`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
 };
 
 export default manifestService;

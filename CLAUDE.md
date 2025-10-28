@@ -241,6 +241,64 @@ DB_PASSWORD=otto2025
 
 ---
 
+## ⚠️ CRITICAL BUSINESS RULES
+
+### Package-Level Manifest Assignment
+
+**IMPORTANT**: The relationship between invoices and manifests operates at the **PACKAGE LEVEL**, not the invoice level.
+
+#### Core Principles:
+
+1. **One Package → Many Manifests**
+   - A single package from an invoice can be assigned to multiple manifests
+   - Example: Package #1 from IN018177 can go on manifest S00037754 AND S00037755
+
+2. **One Invoice → Many Manifests (Split Shipments)**
+   - Packages from the same invoice can be split across different manifests/trucks
+   - Example: IN018177 has 10 packages - 5 go on Manifest A, 5 go on Manifest B
+
+3. **One Manifest → Many Invoices (Mixed Loads)**
+   - One manifest/truck can carry packages from multiple invoices
+   - Example: Manifest S00037754 carries packages from IN018177, IN018186, IN018190
+
+4. **Linking Mechanism: `packing_details.file_name`**
+   - The `file_name` column in `packing_details` stores the manifest_number
+   - This is a **manual, user-controlled** field
+   - When a package is added to a manifest, its `file_name` is set to the manifest_number
+   - When removed, the `file_name` is cleared (NULL)
+
+#### Implementation Details:
+
+```sql
+-- Example: Package-level assignments
+SELECT pd.id, pd.package_number, pd.file_name, i.invoice_number
+FROM packing_details pd
+JOIN invoices i ON pd.invoice_id = i.id
+WHERE i.invoice_number = 'IN018177';
+
+-- Result:
+-- Package 1 → file_name = 'S00037754'  (Manifest A)
+-- Package 2 → file_name = 'S00037754'  (Manifest A)
+-- Package 3 → file_name = 'S00037755'  (Manifest B)
+-- Package 4 → file_name = NULL         (Not yet manifested)
+```
+
+#### Why This Matters:
+
+- **Partial Shipments**: Customer orders 100 items but only 60 are ready → ship 60 now, 40 later
+- **Mixed Loads**: Optimize truck capacity by combining packages from multiple invoices
+- **Flexibility**: Operations team can adjust package assignments based on logistics constraints
+- **Tracking**: Each package has its own journey and can be tracked independently
+
+#### UI/UX Implications:
+
+- When adding invoices to manifests, users must be able to **select individual packages**
+- Cannot assume all packages from an invoice go on one manifest
+- Must show which packages are already assigned to other manifests
+- Removing an invoice from a manifest only affects its packages assigned to that manifest
+
+---
+
 ## 🎯 Key Features
 
 ### 1. Invoice Management
