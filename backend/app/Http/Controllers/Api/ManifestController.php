@@ -23,7 +23,8 @@ class ManifestController extends Controller
             'loadConfirmation.transporter',
             'invoices.customer',
             'invoices.supplier',
-            'invoices.packingDetails'
+            'invoices.packingDetails',
+            'invoices.documents'
         ])
             ->orderBy('created_at', 'desc')
             ->get();
@@ -41,6 +42,7 @@ class ManifestController extends Controller
             'invoices.customer',
             'invoices.supplier',
             'invoices.packingDetails',
+            'invoices.documents',
             'documents'
         ])->findOrFail($id);
 
@@ -446,7 +448,7 @@ class ManifestController extends Controller
         $manifest = Manifest::findOrFail($id);
 
         $validated = $request->validate([
-            'document_type' => 'required|string|in:feri_certificate,customs_declaration,bill_of_lading,coc,export_permit,other',
+            'document_type' => 'required|string|in:invoice,packing_list,bv_report,freight_statement,validated_feri,insurance,manifest,other',
             'document_subtype' => 'nullable|string',
             'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:20480', // 20MB max
         ]);

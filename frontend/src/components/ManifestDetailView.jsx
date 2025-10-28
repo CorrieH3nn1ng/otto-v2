@@ -29,6 +29,10 @@ import {
   ListItemText,
   ListItemSecondaryAction,
   InputAdornment,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import {
   Assignment as ManifestIcon,
@@ -40,8 +44,12 @@ import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Upload as UploadIcon,
+  CloudUpload as CloudUploadIcon,
   Visibility as ViewIcon,
   Search as SearchIcon,
+  Download as DownloadIcon,
+  InsertDriveFile as FileIcon,
+  Image as ImageIcon,
 } from '@mui/icons-material';
 import { manifestService } from '../services/manifestService';
 import { invoiceService } from '../services/invoiceService';
@@ -73,6 +81,7 @@ export default function ManifestDetailView({ manifest: initialManifest, manifest
   const [viewManifestPackagesDialogOpen, setViewManifestPackagesDialogOpen] = useState(false);
   const [selectedInvoiceForView, setSelectedInvoiceForView] = useState(null);
   const [packagesToRemove, setPackagesToRemove] = useState([]);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
     if (!initialManifest && manifestId) {
@@ -149,8 +158,33 @@ export default function ManifestDetailView({ manifest: initialManifest, manifest
 
   const loadDocuments = async () => {
     try {
-      const docs = await manifestService.getDocuments(manifest.id);
-      setDocuments(docs);
+      // Load documents from manifest
+      const manifestDocs = await manifestService.getDocuments(manifest.id);
+
+      // Load documents from all invoices on this manifest
+      const invoices = manifest.invoices || [];
+      const allInvoiceDocs = [];
+
+      for (const invoice of invoices) {
+        if (invoice.documents && invoice.documents.length > 0) {
+          invoice.documents.forEach(doc => {
+            allInvoiceDocs.push({
+              ...doc,
+              source: 'invoice',
+              invoice_number: invoice.invoice_number,
+              invoice_id: invoice.id
+            });
+          });
+        }
+      }
+
+      // Combine manifest and invoice documents
+      const allDocs = [
+        ...manifestDocs.map(doc => ({ ...doc, source: 'manifest' })),
+        ...allInvoiceDocs
+      ];
+
+      setDocuments(allDocs);
     } catch (err) {
       console.error('Failed to load documents:', err);
     }
@@ -276,13 +310,64 @@ export default function ManifestDetailView({ manifest: initialManifest, manifest
     }
   };
 
-  const handleDownloadPdf = () => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-    window.open(`${apiUrl}/manifests/${manifest.id}/download-pdf`, '_blank');
+  const handleDownloadPdf = async () => {
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+      // Open PDF in new tab for viewing
+      window.open(`${apiUrl}/manifests/${manifest.id}/download-pdf`, '_blank');
+
+      // Also fetch the PDF and upload it to documents
+      const response = await fetch(`${apiUrl}/manifests/${manifest.id}/download-pdf`);
+      const blob = await response.blob();
+
+      // Create a File object from the blob
+      const filename = `Manifest_${manifest.manifest_number}.pdf`;
+      const file = new File([blob], filename, { type: 'application/pdf' });
+
+      // Upload the manifest PDF as a document
+      await manifestService.uploadDocument(
+        manifest.id,
+        file,
+        'manifest',
+        null
+      );
+
+      // Reload documents to show the newly uploaded manifest
+      await loadDocuments();
+
+      enqueueSnackbar('Manifest PDF downloaded and uploaded to documents', { variant: 'success' });
+    } catch (err) {
+      console.error('Failed to download/upload manifest PDF:', err);
+      enqueueSnackbar('Manifest opened, but failed to auto-upload: ' + err.message, { variant: 'warning' });
+    }
   };
 
   const handleFileChange = (event) => {
     setSelectedFile(event.target.files[0]);
+  };
+
+  const handleDragOver = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragOver(false);
+
+    const files = event.dataTransfer.files;
+    if (files && files.length > 0) {
+      setSelectedFile(files[0]);
+    }
   };
 
   const handleUploadDocument = async () => {
@@ -331,13 +416,24 @@ export default function ManifestDetailView({ manifest: initialManifest, manifest
     }
   };
 
-  const handleDownloadDocument = async (documentId, filename) => {
+  const handleDownloadDocument = async (doc) => {
     try {
-      const blob = await manifestService.downloadDocument(manifest.id, documentId);
+      let blob;
+      if (doc.source === 'manifest') {
+        blob = await manifestService.downloadDocument(manifest.id, doc.id);
+      } else if (doc.source === 'invoice') {
+        // Download invoice document using invoice API
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+        const response = await fetch(`${apiUrl}/invoices/${doc.invoice_id}/documents/${doc.id}/download`, {
+          method: 'GET',
+        });
+        blob = await response.blob();
+      }
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = filename;
+      a.download = doc.original_filename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -713,56 +809,333 @@ export default function ManifestDetailView({ manifest: initialManifest, manifest
         {/* TAB 3: DOCUMENTS */}
         {activeTab === 2 && (
           <Box sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                Manifest Documents
-              </Typography>
-              <Button
-                variant="contained"
-                startIcon={<UploadIcon />}
-                onClick={() => setUploadDialogOpen(true)}
-                sx={{ bgcolor: '#38b2ac', '&:hover': { bgcolor: '#2c9a8f' } }}
+            {/* Upload Section */}
+            <Paper elevation={2} sx={{ mb: 3, borderRadius: 2, overflow: 'hidden' }}>
+              {/* Teal Header */}
+              <Box sx={{ bgcolor: '#73e9c7', p: 2 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, color: '#001f3f' }}>
+                  Upload Document
+                </Typography>
+              </Box>
+
+              {/* Drag & Drop Zone */}
+              <Box
+                sx={{
+                  p: 4,
+                  textAlign: 'center',
+                  bgcolor: isDragOver ? '#e0f7fa' : '#f5f5f5',
+                  borderBottom: '1px solid #e0e0e0',
+                  border: isDragOver ? '2px dashed #73e9c7' : '2px dashed transparent',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  '&:hover': {
+                    bgcolor: '#ebebeb'
+                  }
+                }}
+                onClick={() => document.getElementById('document-file-input').click()}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
               >
-                Upload Document
-              </Button>
-            </Box>
+                <CloudUploadIcon sx={{ fontSize: 80, color: '#b0bec5', mb: 2 }} />
+                <Typography variant="h6" sx={{ color: '#666', mb: 1 }}>
+                  Drag & drop PDF or click to browse
+                </Typography>
+                {selectedFile && (
+                  <Typography variant="body2" sx={{ color: '#73e9c7', fontWeight: 600, mt: 2 }}>
+                    Selected: {selectedFile.name} ({(selectedFile.size / 1024).toFixed(2)} KB)
+                  </Typography>
+                )}
+                <input
+                  id="document-file-input"
+                  type="file"
+                  accept="application/pdf,image/jpeg,image/jpg,image/png"
+                  onChange={handleFileChange}
+                  style={{ display: 'none' }}
+                />
+              </Box>
 
-            <Alert severity="info" sx={{ mb: 2 }}>
-              Upload all required documents for the FERI process. Minimum required documents will be marked.
-            </Alert>
+              {/* Bottom Section with Dropdowns and Upload Button */}
+              <Box sx={{ p: 3, display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+                <FormControl sx={{ flex: 1 }}>
+                  <InputLabel>Document Type</InputLabel>
+                  <Select
+                    value={documentType}
+                    label="Document Type"
+                    onChange={(e) => setDocumentType(e.target.value)}
+                  >
+                    <MenuItem value="manifest">Manifest PDF *</MenuItem>
+                    <MenuItem value="freight_statement">Freight Statement</MenuItem>
+                    <MenuItem value="insurance">Insurance *</MenuItem>
+                    <MenuItem value="validated_feri">Validated FERI (Certification of Destination)</MenuItem>
+                    <MenuItem value="other">Other</MenuItem>
+                  </Select>
+                  <Typography variant="caption" sx={{ mt: 0.5, color: '#666', display: 'block' }}>
+                    * Required for FERI submission
+                  </Typography>
+                </FormControl>
 
-            <List>
+                {documentType === 'other' && (
+                  <TextField
+                    sx={{ flex: 1 }}
+                    label="Document Subtype"
+                    value={documentSubtype}
+                    onChange={(e) => setDocumentSubtype(e.target.value)}
+                    placeholder="Specify document type"
+                  />
+                )}
+
+                <Button
+                  variant="contained"
+                  onClick={handleUploadDocument}
+                  disabled={!selectedFile || uploading}
+                  sx={{
+                    bgcolor: '#d0d0d0',
+                    color: '#666',
+                    fontWeight: 600,
+                    px: 4,
+                    py: 1.5,
+                    '&:hover': { bgcolor: '#73e9c7', color: '#001f3f' },
+                    '&:disabled': { bgcolor: '#e0e0e0', color: '#999' }
+                  }}
+                >
+                  {uploading ? 'UPLOADING...' : 'UPLOAD DOCUMENT'}
+                </Button>
+              </Box>
+            </Paper>
+
+            {/* Required Documents Checklist */}
+            <Paper elevation={2} sx={{ mb: 3, borderRadius: 2, overflow: 'hidden' }}>
+              <Box sx={{ bgcolor: '#001f3f', p: 2 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, color: 'white' }}>
+                  Required Documents for FERI Submission
+                </Typography>
+              </Box>
+              <Box sx={{ p: 2 }}>
+                <Grid container spacing={2}>
+                  {(() => {
+                    // Check if customer is KAMOA (they arrange their own insurance)
+                    const isKamoaCustomer = manifest?.invoices?.some(invoice =>
+                      invoice.customer?.name?.toUpperCase().includes('KAMOA')
+                    );
+
+                    const requiredDocs = [
+                      { type: 'manifest', label: 'Manifest PDF', required: true },
+                      { type: 'insurance', label: 'Insurance', required: !isKamoaCustomer, note: isKamoaCustomer ? '(KAMOA - Not Required)' : '(Required)' },
+                      { type: 'freight_statement', label: 'Freight Statement', required: false },
+                    ];
+
+                    return requiredDocs.map((req) => {
+                      const hasDocument = documents.some(doc => doc.document_type === req.type);
+                      return (
+                        <Grid item xs={12} sm={6} md={4} key={req.type}>
+                          <Box
+                            sx={{
+                              p: 2,
+                              borderRadius: 1,
+                              bgcolor: hasDocument ? '#e8f5e9' : (req.required ? '#fff3e0' : '#f5f5f5'),
+                              border: `2px solid ${hasDocument ? '#4caf50' : (req.required ? '#ff9800' : '#bdbdbd')}`,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 1
+                            }}
+                          >
+                            {hasDocument ? (
+                              <Chip
+                                icon={<FileIcon />}
+                                label="✓"
+                                size="small"
+                                sx={{
+                                  bgcolor: '#4caf50',
+                                  color: 'white',
+                                  fontWeight: 700,
+                                  fontSize: '16px'
+                                }}
+                              />
+                            ) : (
+                              <Chip
+                                label={req.required ? '!' : ''}
+                                size="small"
+                                sx={{
+                                  bgcolor: req.required ? '#ff9800' : '#bdbdbd',
+                                  color: 'white',
+                                  fontWeight: 700,
+                                  fontSize: '16px'
+                                }}
+                              />
+                            )}
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {req.label}
+                              </Typography>
+                              {req.required && (
+                                <Typography variant="caption" sx={{ color: '#d32f2f' }}>
+                                  Required *
+                                </Typography>
+                              )}
+                              {req.note && (
+                                <Typography variant="caption" sx={{ color: '#666', display: 'block' }}>
+                                  {req.note}
+                                </Typography>
+                              )}
+                            </Box>
+                          </Box>
+                        </Grid>
+                      );
+                    });
+                  })()}
+                </Grid>
+              </Box>
+            </Paper>
+
+            {/* Documents Section */}
+            <Paper elevation={2} sx={{ borderRadius: 2, overflow: 'hidden' }}>
+              <Typography variant="h6" sx={{ p: 2, fontWeight: 600, color: '#001f3f', borderBottom: '2px solid #e0e0e0' }}>
+                Documents ({documents.length})
+              </Typography>
+
               {documents.length === 0 ? (
-                <Alert severity="warning">No documents uploaded yet. Please upload required documents for FERI processing.</Alert>
+                <Box sx={{ p: 6, textAlign: 'center' }}>
+                  <FileIcon sx={{ fontSize: 64, color: '#ccc', mb: 2 }} />
+                  <Typography variant="body1" color="textSecondary">
+                    No documents attached
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                    Upload documents using the form above
+                  </Typography>
+                </Box>
               ) : (
-                documents.map((doc) => (
-                  <ListItem key={doc.id} sx={{ border: '1px solid #e0e0e0', mb: 1, borderRadius: 1 }}>
-                    <ListItemText
-                      primary={doc.original_filename}
-                      secondary={`Type: ${doc.document_type.replace(/_/g, ' ').toUpperCase()} | Size: ${(doc.file_size_bytes / 1024).toFixed(2)} KB | Uploaded: ${new Date(doc.created_at).toLocaleString()}`}
-                    />
-                    <ListItemSecondaryAction>
-                      <IconButton
-                        edge="end"
-                        sx={{ mr: 1 }}
-                        onClick={() => handleDownloadDocument(doc.id, doc.original_filename)}
-                        title="Download"
+                <Box sx={{ p: 2 }}>
+                  <Grid container spacing={2}>
+                {documents.map((doc) => {
+                  const getFileIcon = () => {
+                    if (doc.original_filename.toLowerCase().endsWith('.pdf')) {
+                      return <PdfIcon sx={{ fontSize: 48, color: '#d32f2f' }} />;
+                    } else if (doc.original_filename.match(/\.(jpg|jpeg|png|gif)$/i)) {
+                      return <ImageIcon sx={{ fontSize: 48, color: '#1976d2' }} />;
+                    }
+                    return <FileIcon sx={{ fontSize: 48, color: '#757575' }} />;
+                  };
+
+                  return (
+                    <Grid item xs={12} sm={6} md={4} key={`${doc.source}-${doc.id}`}>
+                      <Paper
+                        elevation={2}
+                        sx={{
+                          p: 2,
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            elevation: 4,
+                            transform: 'translateY(-2px)',
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.12)'
+                          }
+                        }}
                       >
-                        <ViewIcon />
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        color="error"
-                        onClick={() => handleDeleteDocument(doc)}
-                        title="Delete"
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </ListItemSecondaryAction>
-                  </ListItem>
-                ))
-              )}
-            </List>
+                        {/* File Icon and Source Badge */}
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                          <Box sx={{
+                            bgcolor: doc.source === 'invoice' ? '#e3f2fd' : '#e8f5e9',
+                            borderRadius: 2,
+                            p: 1.5,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            {getFileIcon()}
+                          </Box>
+                          {doc.source === 'invoice' ? (
+                            <Chip
+                              icon={<InvoiceIcon />}
+                              label={doc.invoice_number}
+                              size="small"
+                              color="primary"
+                              sx={{ fontWeight: 600 }}
+                            />
+                          ) : (
+                            <Chip
+                              icon={<ManifestIcon />}
+                              label="Manifest"
+                              size="small"
+                              color="success"
+                              sx={{ fontWeight: 600 }}
+                            />
+                          )}
+                        </Box>
+
+                        {/* Filename */}
+                        <Typography
+                          variant="subtitle1"
+                          sx={{
+                            fontWeight: 600,
+                            mb: 1,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}
+                          title={doc.original_filename}
+                        >
+                          {doc.original_filename}
+                        </Typography>
+
+                        {/* Document Type */}
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                          <Chip
+                            label={doc.document_type.replace(/_/g, ' ').toUpperCase()}
+                            size="small"
+                            variant="outlined"
+                            sx={{ fontSize: '0.7rem', height: 20 }}
+                          />
+                        </Box>
+
+                        {/* File Details */}
+                        <Box sx={{ flex: 1, mb: 2 }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                            Size: {(doc.file_size_bytes / 1024).toFixed(2)} KB
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                            {new Date(doc.created_at).toLocaleDateString()} {new Date(doc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </Typography>
+                        </Box>
+
+                        {/* Actions */}
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Button
+                            fullWidth
+                            variant="contained"
+                            startIcon={<DownloadIcon />}
+                            onClick={() => handleDownloadDocument(doc)}
+                            sx={{
+                              bgcolor: '#1976d2',
+                              '&:hover': { bgcolor: '#1565c0' }
+                            }}
+                          >
+                            Download
+                          </Button>
+                          {doc.source === 'manifest' && (
+                            <IconButton
+                              color="error"
+                              onClick={() => handleDeleteDocument(doc)}
+                              sx={{
+                                border: '1px solid',
+                                borderColor: 'error.main',
+                                '&:hover': { bgcolor: 'error.light' }
+                              }}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          )}
+                        </Box>
+                      </Paper>
+                    </Grid>
+                  );
+                })}
+                </Grid>
+              </Box>
+            )}
+            </Paper>
           </Box>
         )}
       </Paper>
@@ -973,77 +1346,6 @@ export default function ManifestDetailView({ manifest: initialManifest, manifest
             disabled={packagesToRemove.length === 0}
           >
             Remove {packagesToRemove.length} Package(s)
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Upload Document Dialog */}
-      <Dialog open={uploadDialogOpen} onClose={() => setUploadDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ bgcolor: '#001f3f', color: 'white' }}>Upload Document</DialogTitle>
-        <DialogContent sx={{ mt: 2 }}>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Upload documents required for FERI processing. Accepted formats: PDF, JPG, PNG (Max 20MB)
-          </Alert>
-
-          <TextField
-            fullWidth
-            select
-            label="Document Type *"
-            value={documentType}
-            onChange={(e) => setDocumentType(e.target.value)}
-            sx={{ mb: 2 }}
-            SelectProps={{ native: true }}
-          >
-            <option value="">Select document type</option>
-            <option value="feri_certificate">FERI Certificate</option>
-            <option value="customs_declaration">Customs Declaration</option>
-            <option value="bill_of_lading">Bill of Lading</option>
-            <option value="coc">Certificate of Conformity (COC)</option>
-            <option value="export_permit">Export Permit</option>
-            <option value="other">Other</option>
-          </TextField>
-
-          <TextField
-            fullWidth
-            label="Document Subtype (Optional)"
-            value={documentSubtype}
-            onChange={(e) => setDocumentSubtype(e.target.value)}
-            placeholder="e.g., Revised, Preliminary, Final"
-            sx={{ mb: 2 }}
-          />
-
-          <Box sx={{ mb: 2 }}>
-            <Button
-              variant="outlined"
-              component="label"
-              fullWidth
-              startIcon={<UploadIcon />}
-            >
-              {selectedFile ? selectedFile.name : 'Choose File *'}
-              <input
-                type="file"
-                hidden
-                accept=".pdf,.jpg,.jpeg,.png"
-                onChange={handleFileChange}
-              />
-            </Button>
-          </Box>
-
-          {selectedFile && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              File selected: {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setUploadDialogOpen(false)} disabled={uploading}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleUploadDocument}
-            disabled={!selectedFile || !documentType || uploading}
-            sx={{ bgcolor: '#38b2ac', '&:hover': { bgcolor: '#2c9a8f' } }}
-          >
-            {uploading ? 'Uploading...' : 'Upload'}
           </Button>
         </DialogActions>
       </Dialog>

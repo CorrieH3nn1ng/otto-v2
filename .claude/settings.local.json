@@ -28,7 +28,16 @@
       "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"UPDATE packing_details SET file_name = ''S00037754'' WHERE invoice_id = 97;\")",
       "Bash(dir:*)",
       "Bash(python:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT d.id, d.original_filename, d.document_type, i.invoice_number FROM documents d JOIN invoices i ON d.invoice_id = i.id WHERE i.invoice_number = ''IN018186'';\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT m.manifest_number, i.invoice_number FROM manifests m JOIN invoice_manifest im ON m.id = im.manifest_id JOIN invoices i ON im.invoice_id = i.id WHERE m.manifest_number = ''S00037754'';\")",
+      "Bash(cat:*)",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SHOW TABLES LIKE ''%document%'';\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SHOW TABLES LIKE ''%type%'';\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"DESCRIBE pending_documents;\")",
+      "Bash(\"C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql\" -h 127.0.0.1 -u ottouser -potto2025 otto_v2 -e \"SELECT document_type, COUNT(*) as count FROM documents GROUP BY document_type;\")"
     ],
     "deny": [],
     "ask": []

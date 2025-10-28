@@ -162,6 +162,38 @@ export default function ManifestList() {
     if (!selectedManifest) return;
 
     try {
+      // Check for required manifest-level documents only
+      // Invoice-level documents are enforced at the invoice stage
+      const documents = await manifestService.getDocuments(selectedManifest.id);
+
+      // Check for Manifest PDF
+      const hasManifest = documents.some(doc => doc.document_type === 'manifest');
+
+      // Check if customer is KAMOA (they arrange their own insurance)
+      const isKamoaCustomer = selectedManifest.invoices?.some(invoice =>
+        invoice.customer?.name?.toUpperCase().includes('KAMOA')
+      );
+
+      // Check for Insurance (required except for KAMOA customer)
+      const hasInsurance = documents.some(doc => doc.document_type === 'insurance');
+
+      const missingDocs = [];
+
+      if (!hasManifest) {
+        missingDocs.push('Manifest PDF');
+      }
+
+      // Only require insurance if NOT a KAMOA customer
+      if (!hasInsurance && !isKamoaCustomer) {
+        missingDocs.push('Insurance');
+      }
+
+      if (missingDocs.length > 0) {
+        alert(`Cannot submit to FERI. Missing required manifest documents:\n\n${missingDocs.join('\n')}\n\nPlease upload all required documents before submitting.`);
+        handleMenuClose();
+        return;
+      }
+
       await manifestService.submitFERI(selectedManifest.id);
       alert('Manifest submitted to FERI successfully!');
       loadData();

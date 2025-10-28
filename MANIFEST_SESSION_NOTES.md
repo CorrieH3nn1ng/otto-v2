@@ -296,5 +296,137 @@ SELECT id, manifest_number, status FROM manifests ORDER BY id DESC;
 
 ---
 
-**Last Updated:** October 17, 2025
-**Next Agent:** Read this first, then ask user which manifest feature to work on next!
+---
+
+## 🆕 October 28, 2025 Session - Document Management Enhancements
+
+### ✅ COMPLETED
+
+#### 1. DOCUMENTS Tab Redesign
+**File:** `frontend/src/components/ManifestDetailView.jsx`
+
+**Changes Made:**
+- Replaced dialog-based upload with embedded inline form
+- Added large drag & drop zone (150px height) with CloudUploadIcon
+- Implemented visual feedback on drag over (cyan background, dashed teal border)
+- Added drag event handlers: handleDragOver, handleDragLeave, handleDrop
+- Styled to match invoice dashboard upload form (teal header #73e9c7)
+- Document type dropdown shows manifest-level documents only
+
+**Lines Modified:**
+- Line 47: Added CloudUploadIcon import
+- Line 84: Added isDragOver state
+- Lines 322-343: Drag & drop event handlers
+- Lines 793-877: Complete upload form redesign
+
+#### 2. Document Type Alignment
+**Migration:** `backend/database/migrations/2025_10_28_124426_update_documents_table_enum_types.php`
+
+**Updated ENUM to business requirements:**
+```sql
+'invoice', 'packing_list', 'bv_report', 'freight_statement',
+'validated_feri', 'insurance', 'manifest', 'other'
+```
+
+**Three-Level Architecture Implemented:**
+1. **Invoice Level:** Invoice (required), Packing List (optional), BV Report (required)
+2. **Manifest Level:** Manifest PDF (required), Insurance (required except KAMOA), Freight Statement (optional)
+3. **FERI Level:** Validated FERI (required)
+
+#### 3. Required Documents Checklist
+**File:** `frontend/src/components/ManifestDetailView.jsx` (lines 879-961)
+
+**Visual Indicators:**
+- Green box with checkmark: Document uploaded ✓
+- Orange box with exclamation: Required document missing
+- Gray box: Optional document missing
+- Dynamic KAMOA detection for insurance requirements
+- Shows "(KAMOA - Not Required)" or "(Required)" based on customer
+
+#### 4. KAMOA Insurance Exception
+**Business Rule:** KAMOA customer arranges their own insurance
+
+**Implementation:**
+```javascript
+const isKamoaCustomer = manifest?.invoices?.some(invoice =>
+  invoice.customer?.name?.toUpperCase().includes('KAMOA')
+);
+```
+
+**Files Updated:**
+- `ManifestDetailView.jsx` (lines 891-895) - Checklist display logic
+- `ManifestList.jsx` (lines 173-189) - FERI submission validation
+
+#### 5. Auto-Upload Manifest PDF
+**File:** `frontend/src/components/ManifestDetailView.jsx` (lines 313-344)
+
+**Workflow:**
+1. User clicks "Download PDF" button
+2. Opens PDF in new browser tab for viewing
+3. Fetches PDF blob from backend API
+4. Converts blob to File object
+5. Automatically uploads as 'manifest' document type
+6. Reloads documents list
+7. Shows success notification
+
+**Benefits:** Single-click workflow, satisfies FERI requirement automatically
+
+#### 6. FERI Submission Validation Simplification
+**File:** `frontend/src/components/ManifestList.jsx` (lines 161-204)
+
+**Simplified Validation:**
+- Checks ONLY manifest-level documents (Manifest PDF, Insurance)
+- Does NOT check invoice-level documents
+- Trusts that invoice stage validated Invoice + BV Report
+- KAMOA exception logic for insurance requirement
+
+**Rationale:** Stage-based validation - each workflow stage validates its own requirements
+
+#### 7. Dashboard Load Confirmations Fix
+**File:** `backend/app/Http/Controllers/Api/InvoiceController.php` (lines 473-475)
+
+**Fix:** Dashboard now only counts load confirmations without manifests
+```php
+'load_confirmations' => \App\Models\LoadConfirmation::whereDoesntHave('manifests')->count()
+```
+
+#### 8. Backend Validation Update
+**File:** `backend/app/Http/Controllers/Api/ManifestController.php` (line 451)
+
+**Updated document upload validation:**
+```php
+'document_type' => 'required|string|in:invoice,packing_list,bv_report,freight_statement,validated_feri,insurance,manifest,other'
+```
+
+### 🎯 Key Outcomes
+
+1. ✅ Professional drag & drop upload interface matching company branding
+2. ✅ Document types aligned with actual business requirements
+3. ✅ Three-level document architecture properly implemented
+4. ✅ KAMOA customer exception logic working correctly
+5. ✅ Manifest PDF auto-uploads when downloaded
+6. ✅ FERI submission validation simplified and working
+7. ✅ Dashboard shows accurate load confirmation bottleneck
+8. ✅ All document management features tested and confirmed working
+
+### 📝 Business Rules Captured
+
+**Document Requirements:**
+- Invoice level enforces Invoice + BV Report before "ready for transport"
+- Manifest level enforces Manifest PDF + Insurance (except KAMOA)
+- FERI level enforces Validated FERI / COD
+
+**Customer-Specific:**
+- KAMOA arranges own insurance (document not required)
+- All other customers must provide insurance document
+
+**Workflow:**
+- Stage-based validation trusts previous stage completion
+- Back-dating scenarios handled by trusting workflow progression
+- Each department validates their own requirements
+
+---
+
+**Last Updated:** October 28, 2025
+**Status:** Document management system complete and production-ready
+**Next Agent:** All manifest document management features implemented and tested. System ready for production use!

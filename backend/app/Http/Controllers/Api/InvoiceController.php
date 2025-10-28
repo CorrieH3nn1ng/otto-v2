@@ -470,9 +470,9 @@ class InvoiceController extends Controller
                 ->where('has_bv_certificate', false)->count(),
 
             // Transport stats
-            'load_confirmations' => \App\Models\LoadConfirmation::count(),
-            'load_confirmations_pending' => \App\Models\LoadConfirmation::where('status', 'draft')->count(),
-            'load_confirmations_confirmed' => \App\Models\LoadConfirmation::where('status', 'transport_confirmed')->count(),
+            'load_confirmations' => \App\Models\LoadConfirmation::whereDoesntHave('manifests')->count(),
+            'load_confirmations_pending' => \App\Models\LoadConfirmation::where('status', 'draft')->whereDoesntHave('manifests')->count(),
+            'load_confirmations_confirmed' => \App\Models\LoadConfirmation::where('status', 'transport_confirmed')->whereDoesntHave('manifests')->count(),
             'manifests' => \App\Models\Manifest::count(),
             'manifests_in_transit' => \App\Models\Manifest::where('status', 'in_transit')->count(),
         ]);

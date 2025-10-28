@@ -1,6 +1,6 @@
 # OTTO v2 - Claude Code Documentation
 
-**Last Updated:** 2025-10-27
+**Last Updated:** 2025-10-28
 **Project Location:** `C:\projects\otto-v2`
 
 ---
@@ -29,7 +29,7 @@ OTTO v2 is a comprehensive logistics management system built for Nucleus Mining 
 - Load confirmation handling
 - Manifest creation and PDF generation
 - Cross-border shipment tracking
-- Document management and storage
+- Document management and storage (multi-level: invoice, manifest, FERI department)
 - FERI (Foreign Exchange Risk Insurance) processing
 
 **Tech Stack:**
@@ -64,6 +64,184 @@ All documentation is located in the project root: `C:\projects\otto-v2`
 ---
 
 ## 🚀 Recent Updates
+
+### Document Management System Enhancements (2025-10-28)
+
+Comprehensive overhaul of document management system to align with actual business processes, implementing three-level document architecture with enhanced UX.
+
+#### 1. Database Schema Update
+**Migration:** `backend/database/migrations/2025_10_28_124426_update_documents_table_enum_types.php`
+
+Updated `documents.document_type` ENUM to match actual business requirements:
+```sql
+ENUM(
+  'invoice',          -- Invoice level (required)
+  'packing_list',     -- Invoice level (optional)
+  'bv_report',        -- Invoice level (required)
+  'freight_statement',-- Manifest level (optional)
+  'validated_feri',   -- FERI Department level (required)
+  'insurance',        -- Manifest level (required except KAMOA)
+  'manifest',         -- Manifest level (required)
+  'other'
+)
+```
+
+**Three-Level Architecture:**
+1. **Invoice Level** (uploaded during invoice processing):
+   - Invoice (required)
+   - Packing List (optional)
+   - BV Report (required before marking invoice ready for transport)
+
+2. **Manifest Level** (uploaded during manifest processing):
+   - Manifest PDF (required) - downloaded copy must be uploaded before FERI submission
+   - Insurance (required, except KAMOA customer)
+   - Freight Statement (optional)
+
+3. **FERI Department Level** (uploaded by FERI department):
+   - Validated FERI / Certification of Destination (required to complete application)
+
+#### 2. Enhanced Upload Interface
+
+**ManifestDetailView.jsx** - Complete DOCUMENTS tab redesign:
+
+**Embedded Upload Form** (lines 793-877):
+- Replaced dialog-based upload with inline embedded form
+- Teal header (#73e9c7) with "Upload Document" title
+- Large drag & drop zone with CloudUploadIcon (150px height)
+- Visual feedback on drag over:
+  - Cyan background color (#e0f2f1)
+  - Dashed teal border (3px)
+- Document type dropdown showing manifest-level documents only
+- Professional styling matching invoice dashboard upload form
+
+**Drag & Drop Event Handlers** (lines 322-343):
+```javascript
+handleDragOver(event) - Sets isDragOver state, prevents default
+handleDragLeave(event) - Clears isDragOver state
+handleDrop(event) - Extracts file from event.dataTransfer.files
+```
+
+**Required Documents Checklist** (lines 879-961):
+- Visual indicator section with color-coded status boxes
+- Green box with checkmark: Document uploaded ✓
+- Orange box with exclamation: Required document missing
+- Gray box: Optional document missing
+- Dynamic KAMOA detection for insurance requirements
+- Shows "(KAMOA - Not Required)" or "(Required)" based on customer
+
+#### 3. KAMOA Insurance Exception Logic
+
+**Customer-Specific Business Rules:**
+
+KAMOA customer arranges their own insurance, so insurance document upload is not required for KAMOA shipments.
+
+**Implementation:**
+```javascript
+// Check if customer is KAMOA
+const isKamoaCustomer = manifest?.invoices?.some(invoice =>
+  invoice.customer?.name?.toUpperCase().includes('KAMOA')
+);
+
+// Dynamic insurance requirement
+const hasInsurance = documents.some(doc => doc.document_type === 'insurance');
+if (!hasInsurance && !isKamoaCustomer) {
+  missingDocs.push('Insurance');
+}
+```
+
+**Files Updated:**
+- `ManifestDetailView.jsx` (lines 891-895) - Checklist display logic
+- `ManifestList.jsx` (lines 173-189) - FERI submission validation
+
+#### 4. Auto-Upload Manifest PDF
+
+**Feature:** When user downloads manifest PDF, system automatically uploads a copy to manifest documents.
+
+**Implementation** in ManifestDetailView.jsx (lines 313-344):
+```javascript
+handleDownloadPdf:
+1. Opens PDF in new browser tab for viewing
+2. Fetches PDF blob from backend API
+3. Converts blob to File object
+4. Calls manifestService.uploadDocument()
+5. Reloads documents list
+6. Shows success notification
+```
+
+**Benefits:**
+- Single-click workflow (download → auto-upload)
+- Ensures manifest PDF is always stored in system
+- Satisfies FERI submission requirement automatically
+- Updates required documents checklist immediately
+
+#### 5. FERI Submission Validation
+
+**Simplified Stage-Based Validation:**
+
+Based on user feedback about back-dating creating confusion, validation was simplified to trust that each workflow stage enforces its own requirements.
+
+**ManifestList.jsx** (lines 161-204):
+```javascript
+handleSubmitFERI:
+- Checks ONLY manifest-level documents:
+  1. Manifest PDF (required)
+  2. Insurance (required except KAMOA customers)
+- Does NOT check invoice-level documents
+- Trusts that invoice stage validated Invoice + BV Report
+- Shows clear error message listing missing manifest documents
+```
+
+**Rationale:**
+- In normal operations, invoices won't reach manifest stage without required documents
+- Back-dating created artificial scenarios where validation seemed incorrect
+- Stage-based validation is simpler and aligns with workflow
+- Each department validates their own requirements
+
+#### 6. Frontend Updates Summary
+
+**ManifestDetailView.jsx:**
+- Line 47: Added CloudUploadIcon import
+- Line 84: Added isDragOver state
+- Lines 322-343: Drag & drop event handlers
+- Lines 313-344: Auto-upload manifest PDF
+- Lines 793-877: Redesigned upload form
+- Lines 879-961: Required documents checklist with KAMOA logic
+
+**ManifestList.jsx:**
+- Lines 161-204: Simplified FERI submission validation
+- Removed invoice-level document checks
+- Added KAMOA insurance exception logic
+
+#### 7. Backend Updates
+
+**ManifestController.php** (line 451):
+- Updated document upload validation to accept new document types
+- Validation: `in:invoice,packing_list,bv_report,freight_statement,validated_feri,insurance,manifest,other`
+
+**InvoiceController.php** (lines 473-475):
+- Fixed Load Confirmations count on dashboard
+- Now only counts load confirmations without manifests using `whereDoesntHave('manifests')`
+- Shows true bottleneck for processing
+
+#### 8. Business Rules Summary
+
+**Document Requirements by Level:**
+- Invoice: Invoice (required), Packing List (optional), BV Report (required)
+- Manifest: Manifest PDF (required), Insurance (required except KAMOA), Freight Statement (optional)
+- FERI: Validated FERI / COD (required)
+
+**Customer-Specific Rules:**
+- KAMOA customers arrange their own insurance
+- Insurance document not required for KAMOA shipments
+- All other customers must provide insurance document
+
+**Workflow Rules:**
+- BV Report required before invoice can be marked "ready for transport"
+- Manifest PDF must be uploaded before FERI submission
+- Each workflow stage validates its own requirements
+- Stage-based validation trusts previous stage completion
+
+---
 
 ### Manifest PDF Generation Improvements (2025-10-27)
 
